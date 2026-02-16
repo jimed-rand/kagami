@@ -1,0 +1,72 @@
+{
+  "release": "noble",
+  "system": {
+    "hostname": "ubuntu-ukui",
+    "block_snapd": true,
+    "architecture": "amd64",
+    "locale": "en_US.UTF-8",
+    "timezone": "UTC"
+  },
+  "repository": {
+    "mirror": "http://archive.ubuntu.com/ubuntu/",
+    "use_proposed": false
+  },
+  "packages": {
+    "essential": [
+      "sudo",
+      "ubuntu-standard",
+      "casper",
+      "discover",
+      "laptop-detect",
+      "os-prober",
+      "network-manager",
+      "net-tools",
+      "wireless-tools",
+      "wpagui",
+      "locales",
+      "grub-common",
+      "grub-gfxpayload-lists",
+      "grub-pc",
+      "grub-pc-bin",
+      "grub2-common",
+      "grub-efi-amd64-signed",
+      "shim-signed",
+      "mtools",
+      "binutils"
+    ],
+    "additional": [
+      "ukui-desktop-environment",
+      "lightdm",
+      "peony",
+      "ukui-terminal",
+      "firefox",
+      "vim",
+      "curl",
+      "wget"
+    ],
+    "desktop": "none",
+    "remove_list": [
+      "ubuntu-advantage-tools",
+      "ubuntu-report",
+      "whoopsie",
+      "apport",
+      "popularity-contest"
+    ]
+  },
+  "installer": {
+    "type": "ubiquity",
+    "slideshow": "ubuntu"
+  },
+  "network": {
+    "manager": "network-manager"
+  },
+  "security": {
+    "enable_firewall": false,
+    "block_snapd_forever": true,
+    "disable_services": [
+      "whoopsie",
+      "apport",
+      "ubuntu-report"
+    ]
+  }
+}

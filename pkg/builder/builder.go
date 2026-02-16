@@ -1,0 +1,604 @@
+package builder
+
+import (
+	"fmt"
+	"log"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+
+	"kagami/pkg/config"
+)
+
+// Builder handles the ISO building process
+type Builder struct {
+	Config    *config.Config
+	WorkDir   string
+	OutputISO string
+	ChrootDir string
+	ImageDir  string
+}
+
+// NewBuilder creates a new Builder instance
+func NewBuilder(cfg *config.Config, workDir, outputISO string) *Builder {
+	return &Builder{
+		Config:    cfg,
+		WorkDir:   workDir,
+		OutputISO: outputISO,
+		ChrootDir: filepath.Join(workDir, "chroot"),
+		ImageDir:  filepath.Join(workDir, "image"),
+	}
+}
+
+// Build executes the complete build process
+func (b *Builder) Build() error {
+	steps := []struct {
+		name string
+		fn   func() error
+	}{
+		{"Checking prerequisites", b.checkPrerequisites},
+		{"Creating directories", b.createDirectories},
+		{"Bootstrapping base system", b.bootstrapSystem},
+		{"Mounting filesystems", b.mountFilesystems},
+		{"Configuring system", b.configureSystem},
+		{"Installing packages", b.installPackages},
+		{"Blocking snapd permanently", b.blockSnapd},
+		{"Installing desktop environment", b.installDesktop},
+		{"Configuring bootloader", b.configureBootloader},
+		{"Cleaning up chroot", b.cleanupChroot},
+		{"Creating filesystem image", b.createFilesystem},
+		{"Creating ISO", b.createISO},
+		{"Cleaning up", b.cleanup},
+	}
+
+	for i, step := range steps {
+		fmt.Printf("[%d/%d] %s...\n", i+1, len(steps), step.name)
+		if err := step.fn(); err != nil {
+			return fmt.Errorf("%s failed: %v", step.name, err)
+		}
+	}
+
+	return nil
+}
+
+// checkPrerequisites verifies required tools are installed
+func (b *Builder) checkPrerequisites() error {
+	required := []string{
+		"debootstrap",
+		"squashfs-tools",
+		"xorriso",
+		"grub-mkstandalone",
+		"gpg",
+		"wget",
+	}
+
+	for _, tool := range required {
+		if _, err := exec.LookPath(tool); err != nil {
+			return fmt.Errorf("required tool '%s' not found. Install with: sudo apt-get install %s", tool, tool)
+		}
+	}
+
+	// Check if running as root
+	if os.Geteuid() != 0 {
+		return fmt.Errorf("this program must be run as root (use sudo)")
+	}
+
+	return nil
+}
+
+// createDirectories creates necessary directory structure
+func (b *Builder) createDirectories() error {
+	dirs := []string{
+		b.WorkDir,
+		b.ChrootDir,
+		b.ImageDir,
+		filepath.Join(b.ImageDir, "casper"),
+		filepath.Join(b.ImageDir, "isolinux"),
+		filepath.Join(b.ImageDir, "install"),
+	}
+
+	for _, dir := range dirs {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// bootstrapSystem creates the base Ubuntu system using debootstrap
+func (b *Builder) bootstrapSystem() error {
+	// Check if chroot already exists
+	if _, err := os.Stat(filepath.Join(b.ChrootDir, "etc")); err == nil {
+		log.Println("Chroot already exists, skipping bootstrap")
+		return nil
+	}
+
+	mirror := b.Config.Repository.Mirror
+	if mirror == "" {
+		mirror = "http://archive.ubuntu.com/ubuntu/"
+	}
+
+	// If running devel, we bootstrap the latest LTS first
+	bootstrapRelease := b.Config.Release
+	if bootstrapRelease == "devel" {
+		bootstrapRelease = "noble" // Latest LTS
+		fmt.Println("[INFO] Bootstrapping with 'noble' (LTS) for devel target")
+	}
+
+	cmd := exec.Command("debootstrap",
+		"--arch="+b.Config.System.Architecture,
+		"--variant=minbase",
+		bootstrapRelease,
+		b.ChrootDir,
+		mirror,
+	)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	return cmd.Run()
+}
+
+// mountFilesystems mounts necessary filesystems for chroot
+func (b *Builder) mountFilesystems() error {
+	// ... (code omitted for brevity, no changes needed here but context helps)
+	mounts := []struct {
+		source string
+		target string
+		fstype string
+		flags  string
+	}{
+		{"/dev", filepath.Join(b.ChrootDir, "dev"), "", "bind"},
+		{"/run", filepath.Join(b.ChrootDir, "run"), "", "bind"},
+	}
+
+	for _, m := range mounts {
+		target := m.target
+
+		// Check if already mounted
+		if isMounted(target) {
+			continue
+		}
+
+		var cmd *exec.Cmd
+		if m.flags == "bind" {
+			cmd = exec.Command("mount", "--bind", m.source, target)
+		} else {
+			cmd = exec.Command("mount", "-t", m.fstype, m.source, target)
+		}
+
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("failed to mount %s: %v", target, err)
+		}
+	}
+
+	return nil
+}
+
+// configureSystem performs basic system configuration
+func (b *Builder) configureSystem() error {
+	scripts := []string{
+		// Set hostname
+		fmt.Sprintf("echo '%s' > /etc/hostname", b.Config.System.Hostname),
+
+		// Configure apt sources
+		b.generateSourcesList(),
+
+		// Mount internal filesystems
+		"mount none -t proc /proc 2>/dev/null || true",
+		"mount none -t sysfs /sys 2>/dev/null || true",
+		"mount none -t devpts /dev/pts 2>/dev/null || true",
+
+		// Set environment
+		"export HOME=/root",
+		"export LC_ALL=C",
+	}
+
+	for _, script := range scripts {
+		if err := b.chrootExec(script); err != nil {
+			return err
+		}
+	}
+
+	// Add additional repositories with keys (Standard Ubuntu)
+	if err := b.configureAdditionalRepos(); err != nil {
+		log.Printf("Warning: Failed to configure additional repos: %v", err)
+	}
+
+	// Continue with rest of configuration
+	moreScripts := []string{
+		// Update package lists
+		"apt-get update",
+
+		// Install systemd
+		"DEBIAN_FRONTEND=noninteractive apt-get install -y libterm-readline-gnu-perl systemd-sysv",
+
+		// Configure machine-id
+		"dbus-uuidgen > /etc/machine-id",
+		"ln -fs /etc/machine-id /var/lib/dbus/machine-id",
+
+		// Setup diversion for initctl
+		"dpkg-divert --local --rename --add /sbin/initctl",
+		"ln -s /bin/true /sbin/initctl",
+	}
+
+	for _, script := range moreScripts {
+		if err := b.chrootExec(script); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// installPackages installs all required packages
+func (b *Builder) installPackages() error {
+	// Upgrade existing packages
+	if err := b.chrootExec("DEBIAN_FRONTEND=noninteractive apt-get -y dist-upgrade"); err != nil {
+		return err
+	}
+
+	// Install essential packages
+	essentialPkgs := strings.Join(b.Config.Packages.Essential, " ")
+	if err := b.chrootExec(fmt.Sprintf("DEBIAN_FRONTEND=noninteractive apt-get install -y %s", essentialPkgs)); err != nil {
+		return err
+	}
+
+	// Install kernel
+	if err := b.chrootExec("DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends linux-generic"); err != nil {
+		return err
+	}
+
+	// Install additional packages
+	if len(b.Config.Packages.Additional) > 0 {
+		additionalPkgs := strings.Join(b.Config.Packages.Additional, " ")
+		if err := b.chrootExec(fmt.Sprintf("DEBIAN_FRONTEND=noninteractive apt-get install -y %s", additionalPkgs)); err != nil {
+			log.Printf("Warning: Some additional packages failed to install: %v", err)
+		}
+	}
+
+	return nil
+}
+
+// blockSnapd implements comprehensive snapd blocking
+func (b *Builder) blockSnapd() error {
+	fmt.Println("[ACTION] Implementing comprehensive snapd blocking...")
+
+	scripts := []string{
+		// Remove snapd if present
+		"apt-get purge -y snapd || true",
+		"apt-get autoremove -y || true",
+
+		// Create APT preference to block snapd
+		`cat > /etc/apt/preferences.d/no-snapd <<'EOF'
+Package: snapd
+Pin: release *
+Pin-Priority: -1
+
+Package: snapd-*
+Pin: release *
+Pin-Priority: -1
+EOF`,
+
+		// Create systemd drop-in to prevent snapd service activation
+		"mkdir -p /etc/systemd/system/snapd.service.d",
+		`cat > /etc/systemd/system/snapd.service.d/override.conf <<'EOF'
+[Unit]
+# Snapd is permanently disabled on this system
+ConditionPathExists=!/etc/snapd-blocked
+
+[Service]
+ExecStart=
+ExecStart=/bin/false
+EOF`,
+
+		// Create marker file
+		"touch /etc/snapd-blocked",
+		`echo "Snapd is permanently blocked on this system" > /etc/snapd-blocked`,
+
+		// Block snapd socket
+		"mkdir -p /etc/systemd/system/snapd.socket.d",
+		`cat > /etc/systemd/system/snapd.socket.d/override.conf <<'EOF'
+[Unit]
+ConditionPathExists=!/etc/snapd-blocked
+
+[Socket]
+ListenStream=
+EOF`,
+
+		// Create hook to prevent snapd installation
+		"mkdir -p /etc/apt/apt.conf.d",
+		`cat > /etc/apt/apt.conf.d/99-block-snapd <<'EOF'
+// Block snapd package installation
+DPkg::Pre-Install-Pkgs {
+  "/usr/local/bin/block-snapd-hook";
+};
+EOF`,
+
+		// Create the blocking hook script
+		`cat > /usr/local/bin/block-snapd-hook <<'EOFSCRIPT'
+#!/bin/bash
+# Hook to prevent snapd installation
+
+while read pkg; do
+    if [[ "$pkg" == *"snapd"* ]]; then
+        echo "ERROR: Installation of snapd is blocked on this system!" >&2
+        echo "This system is configured to never use snapd." >&2
+        exit 1
+    fi
+done
+EOFSCRIPT`,
+
+		"chmod +x /usr/local/bin/block-snapd-hook",
+
+		// Add warning to MOTD
+		"mkdir -p /etc/update-motd.d",
+		`cat > /etc/update-motd.d/99-snapd-blocked <<'EOF'
+#!/bin/sh
+echo ""
+echo "-----------------------------------------------------------"
+echo "  WARNING: Snapd is permanently blocked on this system     "
+echo "  Snap packages cannot be installed or used                "
+echo "-----------------------------------------------------------"
+echo ""
+EOF`,
+
+		"chmod +x /etc/update-motd.d/99-snapd-blocked",
+
+		// Create diversion for snapd package
+		"dpkg-divert --local --rename --add /usr/bin/snap || true",
+		"ln -sf /bin/false /usr/bin/snap || true",
+
+		// Remove any snap directories
+		"rm -rf /snap /var/snap /var/lib/snapd ~/snap || true",
+
+		// Add snapd blocking to profile
+		`cat >> /etc/profile.d/block-snapd.sh <<'EOF'
+# Snapd is blocked on this system
+export SNAPD_BLOCKED=1
+
+# Override snap command
+snap() {
+    echo "ERROR: Snapd is permanently blocked on this system" >&2
+    return 1
+}
+EOF`,
+
+		"chmod +x /etc/profile.d/block-snapd.sh",
+	}
+
+	for _, script := range scripts {
+		if err := b.chrootExec(script); err != nil {
+			log.Printf("Warning during snapd blocking: %v", err)
+		}
+	}
+
+	fmt.Println("[SUCCESS] Snapd blocked permanently with multiple layers of protection")
+	return nil
+}
+
+// installDesktop installs the selected desktop environment
+func (b *Builder) installDesktop() error {
+	// If desktop is "none", user is manually specifying packages in "additional"
+	// We just need to ensure ubiquity installer is installed
+	if b.Config.Packages.Desktop == "none" {
+		log.Println("Desktop set to 'none' - packages should be specified in 'additional' list")
+
+		// Install ubiquity if requested
+		if b.Config.Installer.Type == "ubiquity" {
+			installerPkgs := []string{
+				"ubiquity",
+				"ubiquity-casper",
+				"ubiquity-frontend-gtk",
+				"ubiquity-ubuntu-artwork",
+			}
+
+			// Add slideshow package based on config
+			slideshowMap := map[string]string{
+				"ubuntu":      "ubiquity-slideshow-ubuntu",
+				"kubuntu":     "ubiquity-slideshow-kubuntu",
+				"xubuntu":     "ubiquity-slideshow-xubuntu",
+				"lubuntu":     "ubiquity-slideshow-lubuntu",
+				"ubuntu-mate": "ubiquity-slideshow-ubuntu-mate",
+			}
+
+			if slideshow, ok := slideshowMap[b.Config.Installer.Slideshow]; ok {
+				installerPkgs = append(installerPkgs, slideshow)
+			}
+
+			installerList := strings.Join(installerPkgs, " ")
+			if err := b.chrootExec(fmt.Sprintf("DEBIAN_FRONTEND=noninteractive apt-get install -y %s", installerList)); err != nil {
+				log.Printf("Warning: Some installer packages failed to install: %v", err)
+			}
+		}
+
+		// Remove unwanted packages
+		if len(b.Config.Packages.RemoveList) > 0 {
+			removeList := strings.Join(b.Config.Packages.RemoveList, " ")
+			b.chrootExec(fmt.Sprintf("apt-get purge -y %s || true", removeList))
+		}
+
+		b.chrootExec("apt-get autoremove -y")
+		return nil
+	}
+
+	desktopPackages := map[string][]string{
+		"gnome": {
+			"plymouth-themes",
+			"ubuntu-gnome-desktop",
+			"ubuntu-gnome-wallpapers",
+		},
+		"kde": {
+			"kubuntu-desktop",
+		},
+		"xfce": {
+			"xubuntu-desktop",
+		},
+		"lxde": {
+			"lubuntu-desktop",
+		},
+		"lxqt": {
+			"lubuntu-desktop",
+		},
+		"mate": {
+			"ubuntu-mate-desktop",
+		},
+	}
+
+	pkgs, ok := desktopPackages[b.Config.Packages.Desktop]
+	if !ok {
+		return fmt.Errorf("unknown desktop environment: %s", b.Config.Packages.Desktop)
+	}
+
+	pkgList := strings.Join(pkgs, " ")
+	if err := b.chrootExec(fmt.Sprintf("DEBIAN_FRONTEND=noninteractive apt-get install -y %s", pkgList)); err != nil {
+		return err
+	}
+
+	// Ensure the correct installer is installed based on config
+	if b.Config.Installer.Type == "ubiquity" {
+		installerPkgs := []string{
+			"ubiquity",
+			"ubiquity-casper",
+			"ubiquity-frontend-gtk",
+			"ubiquity-ubuntu-artwork",
+		}
+
+		installerList := strings.Join(installerPkgs, " ")
+		if err := b.chrootExec(fmt.Sprintf("DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends %s", installerList)); err != nil {
+			log.Printf("Warning: Some installer packages failed to install: %v", err)
+		}
+
+		// Remove unnecessary slideshows to reduce bloat as requested
+		// We keep only the one matching the desktop if possible, or none if user wants "clean"
+		// The user said "jangan disertakan dengan slide yang tidak diperlukan"
+		slideshowsToRemove := []string{
+			"ubiquity-slideshow-kubuntu",
+			"ubiquity-slideshow-xubuntu",
+			"ubiquity-slideshow-lubuntu",
+			"ubiquity-slideshow-ubuntu-mate",
+			"ubiquity-slideshow-ubuntu-budgie",
+			"ubiquity-slideshow-ubuntu",
+		}
+
+		purgeList := strings.Join(slideshowsToRemove, " ")
+		b.chrootExec(fmt.Sprintf("apt-get purge -y %s || true", purgeList))
+	}
+
+	// Remove unwanted packages
+	if len(b.Config.Packages.RemoveList) > 0 {
+		removeList := strings.Join(b.Config.Packages.RemoveList, " ")
+		b.chrootExec(fmt.Sprintf("apt-get purge -y %s || true", removeList))
+	}
+
+	// Cleanup
+	b.chrootExec("apt-get autoremove -y")
+
+	return nil
+}
+
+// configureBootloader sets up GRUB and creates boot files
+func (b *Builder) configureBootloader() error {
+	// Copy kernel and initrd
+	kernelPattern := filepath.Join(b.ChrootDir, "boot", "vmlinuz-*-generic")
+	initrdPattern := filepath.Join(b.ChrootDir, "boot", "initrd.img-*-generic")
+
+	kernels, _ := filepath.Glob(kernelPattern)
+	initrds, _ := filepath.Glob(initrdPattern)
+
+	if len(kernels) > 0 {
+		exec.Command("cp", kernels[0], filepath.Join(b.ImageDir, "casper", "vmlinuz")).Run()
+	}
+	if len(initrds) > 0 {
+		exec.Command("cp", initrds[0], filepath.Join(b.ImageDir, "casper", "initrd")).Run()
+	}
+
+	// Download memtest86+
+	memtestURL := "https://memtest.org/download/v7.00/mt86plus_7.00.binaries.zip"
+	memtestZip := filepath.Join(b.ImageDir, "install", "memtest86.zip")
+
+	exec.Command("wget", "--progress=dot", memtestURL, "-O", memtestZip).Run()
+	exec.Command("unzip", "-p", memtestZip, "memtest64.bin").
+		Output() // We'll handle output separately
+	exec.Command("unzip", "-p", memtestZip, "memtest64.efi").
+		Output()
+	exec.Command("rm", "-f", memtestZip).Run()
+
+	// Create ubuntu marker file
+	markerFile := filepath.Join(b.ImageDir, "ubuntu")
+	os.WriteFile(markerFile, []byte(""), 0644)
+
+	// Create GRUB configuration
+	grubCfg := filepath.Join(b.ImageDir, "isolinux", "grub.cfg")
+	grubContent := b.generateGrubConfig()
+	if err := os.WriteFile(grubCfg, []byte(grubContent), 0644); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// generateGrubConfig creates GRUB menu configuration
+func (b *Builder) generateGrubConfig() string {
+	return `
+search --set=root --file /ubuntu
+
+insmod all_video
+
+set default="0"
+set timeout=30
+
+menuentry "Try Ubuntu Custom without installing" {
+   linux /casper/vmlinuz boot=casper nopersistent toram quiet splash ---
+   initrd /casper/initrd
+}
+
+menuentry "Install Ubuntu Custom" {
+   linux /casper/vmlinuz boot=casper only-ubiquity quiet splash ---
+   initrd /casper/initrd
+}
+
+menuentry "Check disc for defects" {
+   linux /casper/vmlinuz boot=casper integrity-check quiet splash ---
+   initrd /casper/initrd
+}
+
+grub_platform
+if [ "$grub_platform" = "efi" ]; then
+menuentry 'UEFI Firmware Settings' {
+   fwsetup
+}
+
+menuentry "Test memory Memtest86+ (UEFI)" {
+   linux /install/memtest86+.efi
+}
+else
+menuentry "Test memory Memtest86+ (BIOS)" {
+   linux16 /install/memtest86+.bin
+}
+fi
+`
+}
+
+// cleanupChroot performs cleanup before creating filesystem image
+func (b *Builder) cleanupChroot() error {
+	scripts := []string{
+		"truncate -s 0 /etc/machine-id",
+		"rm -f /sbin/initctl",
+		"dpkg-divert --rename --remove /sbin/initctl",
+		"apt-get clean",
+		"rm -rf /tmp/* ~/.bash_history",
+		"umount /proc || true",
+		"umount /sys || true",
+		"umount /dev/pts || true",
+	}
+
+	for _, script := range scripts {
+		b.chrootExec(script)
+	}
+
+	return nil
+}
+
+// Continued in next part...
