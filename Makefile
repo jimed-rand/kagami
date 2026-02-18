@@ -10,10 +10,11 @@ help: ## Show this help message
 	@echo ""
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
-build: ## Build the Kagami binary
-	@echo "[STEP] Building Kagami $(VERSION)..."
-	@go build -ldflags="-X kagami/pkg/config.Version=$(VERSION)" -o $(BINARY_NAME) .
+build: ## Build the Kagami binary (static/portable)
+	@echo "[STEP] Building Kagami $(VERSION) (Static/Portable)..."
+	@CGO_ENABLED=0 go build -ldflags="-X kagami/pkg/config.Version=$(VERSION) -s -w" -o $(BINARY_NAME) .
 	@echo "[SUCCESS] Build complete: ./$(BINARY_NAME)"
+	@echo "          Note: This binary is builded but you can't run it on non-APT based systems."
 
 install: build ## Install Kagami to system (requires sudo)
 	@echo "[STEP] Installing Kagami $(VERSION) to $(INSTALL_PATH)..."
@@ -64,12 +65,16 @@ tidy: ## Tidy go.mod
 
 check-prereqs: ## Check system prerequisites
 	@echo "[INFO] Checking system compatibility..."
-	@command -v apt-get >/dev/null 2>&1 || { echo "[ERROR] APT not found - Kagami requires Ubuntu/Debian"; exit 1; }
-	@command -v dpkg >/dev/null 2>&1 || { echo "[ERROR] dpkg not found - Kagami requires Ubuntu/Debian"; exit 1; }
-	@test -f /etc/debian_version -o -f /etc/lsb-release || { echo "[ERROR] Not a Debian/Ubuntu system"; exit 1; }
-	@echo "[SUCCESS] System is APT-based (compatible)"
+	@if [ ! -f /etc/debian_version ] && [ ! -f /etc/lsb-release ]; then \
+		echo "[WARNING] Not a Debian/Ubuntu host environment."; \
+		echo "Kagami requires an APT-based system to RUN (but not to build)."; \
+		echo "[TIP] Use Distrobox (Docker/Podman) to run Kagami on non-APT distros."; \
+		echo "Ensure your home folder is mapped to the container."; \
+	else \
+		echo "[SUCCESS] System is APT-based (compatible)"; \
+	fi
 	@echo ""
-	@echo "Run 'sudo ./$(BINARY_NAME) --check-deps' to verify build dependencies"
+	@echo "Run 'sudo ./$(BINARY_NAME) --check-deps' to verify runtime dependencies"
 
 version: ## Show version information
 	@./$(BINARY_NAME) --version 2>/dev/null || echo "Kagami $(VERSION) (not built yet - run 'make build')"

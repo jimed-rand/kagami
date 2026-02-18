@@ -1,5 +1,10 @@
 package builder
 
+// NOTE for non-APT distribution users:
+// If you are running Kagami on a non-APT system (e.g., Fedora, Arch, openSUSE),
+// it is recommended to run it inside a Distrobox container (Ubuntu/Debian)
+// with your home folder mapped to ensure proper file access and workspace management.
+
 import (
 	"fmt"
 	"log"

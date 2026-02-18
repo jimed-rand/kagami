@@ -55,6 +55,9 @@ func main() {
 
 	// Check for APT-based system
 	if !system.IsAPTBased() {
+		fmt.Printf("\n[TIP] If you are on a non-APT distribution (Fedora, Arch, etc.), use Distrobox (Docker/Podman)\n")
+		fmt.Printf("      to create an Ubuntu/Debian container. Ensure you map/use your home folder\n")
+		fmt.Printf("      so %s can access the build workspace correctly.\n\n", config.AppName)
 		fatal("%s requires an APT-based distribution (Ubuntu/Debian)", config.AppName)
 	}
 

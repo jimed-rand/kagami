@@ -31,6 +31,8 @@ Kagami is optimized for execution on Advanced Package Tool (APT) based environme
 
 **Note**: Non-APT distributions (e.g., Fedora, Arch, openSUSE) and APT-RPM based systems (e.g., ALT Linux) are explicitly unsupported.
 
+**Tip for non-APT Users**: If you are running a non-APT distribution, it is highly recommended to use **Distrobox** (via Docker or Podman) to create a compatible Ubuntu or Debian container. Ensure that your container is configured to use your **home folder** (which is the default in Distrobox) so that Kagami can properly access the source code and manage the build workspace.
+
 ### Computational Requirements
 
 - **Memory**: Minimum of 4GB allocated RAM; 8GB recommended for concurrent build processes.
