@@ -52,10 +52,11 @@ type InstallerConfig struct {
 
 // PackageConfig defines package installation preferences
 type PackageConfig struct {
-	Essential  []string `json:"essential"`
-	Additional []string `json:"additional"`
-	Desktop    string   `json:"desktop"` // gnome, kde, xfce, lxde, mate, none
-	RemoveList []string `json:"remove_list"`
+	Essential     []string `json:"essential"`
+	Additional    []string `json:"additional"`
+	Desktop       string   `json:"desktop"` // gnome, kde, xfce, lxde, mate, none
+	RemoveList    []string `json:"remove_list"`
+	EnableFlatpak bool     `json:"enable_flatpak"`
 }
 
 // NetworkConfig for network settings

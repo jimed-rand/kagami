@@ -23,8 +23,8 @@ func RunWizard() (*Config, string, error) {
 
 	fmt.Println()
 	fmt.Println("╔══════════════════════════════════════════════════════════════╗")
-	fmt.Println("║              Kagami Configuration Wizard                    ║")
-	fmt.Println("║          Interactive ISO Build Configuration                ║")
+	fmt.Println("║              Kagami Configuration Wizard                     ║")
+	fmt.Println("║          Interactive ISO Build Configuration                 ║")
 	fmt.Println("╚══════════════════════════════════════════════════════════════╝")
 	fmt.Println()
 
@@ -43,9 +43,9 @@ func RunWizard() (*Config, string, error) {
 	var releaseOptions []WizardOption
 	if isDebian {
 		releaseOptions = []WizardOption{
-			{"bookworm", "Bookworm", "Debian 12 (Stable)"},
-			{"trixie", "Trixie", "Debian 13 (Testing)"},
-			{"sid", "Sid", "Debian Unstable (Rolling)"},
+			{"trixie", "Trixie", "Debian 13 (Stable)"},
+			{"testing", "Testing", "Debian Testing"},
+			{"sid", "Unstable", "Debian Unstable (Rolling)"},
 		}
 	} else {
 		releaseOptions = []WizardOption{
@@ -211,8 +211,14 @@ func RunWizard() (*Config, string, error) {
 	}
 	fmt.Println()
 
-	// ─── Step 11: Security Options ──────────────────────────────────────
-	fmt.Println("┌─ Step 11: Security ─────────────────────────────────────────┐")
+	// ─── Step 11: Application Support ─────────────────────────────────────
+	fmt.Println("┌─ Step 11: Application Support ──────────────────────────────┐")
+	enableFlatpakStr := promptString(reader, "Enable Flatpak support? [Y/n]:", "Y")
+	enableFlatpak := strings.ToLower(enableFlatpakStr) != "n"
+	fmt.Println()
+
+	// ─── Step 12: Security Options ──────────────────────────────────────
+	fmt.Println("┌─ Step 12: Security ─────────────────────────────────────────┐")
 	blockSnapd := true
 	if !isDebian {
 		blockSnapdStr := promptString(reader, "Block snapd? [Y/n]:", "Y")
@@ -238,10 +244,11 @@ func RunWizard() (*Config, string, error) {
 		calamaresConfig: calamaresConfigPath,
 		blockSnapd:      blockSnapd,
 		enableFirewall:  enableFirewall,
+		enableFlatpak:   enableFlatpak,
 	})
 
-	// ─── Step 12: Output File ───────────────────────────────────────────
-	fmt.Println("┌─ Step 12: Save Configuration ───────────────────────────────┐")
+	// ─── Step 13: Output File ───────────────────────────────────────────
+	fmt.Println("┌─ Step 13: Save Configuration ───────────────────────────────┐")
 	defaultOutputName := fmt.Sprintf("kagami-%s-%s.json", release, desktop)
 	if isMinimal {
 		defaultOutputName = fmt.Sprintf("kagami-%s-minimal-installer.json", release)
@@ -293,6 +300,7 @@ type wizardParams struct {
 	calamaresConfig string
 	blockSnapd      bool
 	enableFirewall  bool
+	enableFlatpak   bool
 }
 
 func buildWizardConfig(p wizardParams) *Config {
@@ -336,10 +344,11 @@ func buildWizardConfig(p wizardParams) *Config {
 			AdditionalRepos: []AdditionalRepo{},
 		},
 		Packages: PackageConfig{
-			Essential:  essential,
-			Additional: additional,
-			Desktop:    p.desktop,
-			RemoveList: removeList,
+			Essential:     essential,
+			Additional:    additional,
+			Desktop:       p.desktop,
+			RemoveList:    removeList,
+			EnableFlatpak: p.enableFlatpak,
 		},
 		Installer: InstallerConfig{
 			Type:            p.installerType,

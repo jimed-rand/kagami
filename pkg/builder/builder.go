@@ -76,6 +76,7 @@ func (b *Builder) Build() error {
 		{"Installing packages", b.installPackages},
 		{"Blocking snapd permanently", b.blockSnapd},
 		{"Installing desktop environment", b.installDesktop},
+		{"Configuring Flatpak", b.setupFlatpak},
 		{"Configuring bootloader", b.configureBootloader},
 		{"Cleaning up chroot", b.cleanupChroot},
 		{"Creating filesystem image", b.createFilesystem},
@@ -498,24 +499,31 @@ func (b *Builder) installDesktop() error {
 
 	desktopPackages := map[string][]string{
 		"gnome": {
+			"vanilla-gnome-desktop",
+			"vanilla-gnome-default-settings",
+			"gnome-session",
+			"gnome-tweaks",
+			"gnome-shell-extension-manager",
+			"gnome-backgrounds",
+			"fonts-cantarell",
+			"adwaita-icon-theme",
 			"plymouth-themes",
-			"ubuntu-gnome-desktop",
-			"ubuntu-gnome-wallpapers",
 		},
 		"kde": {
-			"kubuntu-desktop",
+			"kde-plasma-desktop",
 		},
 		"xfce": {
-			"xubuntu-desktop",
+			"xfce4",
+			"xfce4-goodies",
 		},
 		"lxde": {
-			"lubuntu-desktop",
+			"lxde",
 		},
 		"lxqt": {
-			"lubuntu-desktop",
+			"lxqt",
 		},
 		"mate": {
-			"ubuntu-mate-desktop",
+			"mate-desktop-environment",
 		},
 	}
 
@@ -549,7 +557,12 @@ func (b *Builder) installDesktop() error {
 	}
 
 	pkgList := strings.Join(pkgs, " ")
-	if err := b.chrootExec(fmt.Sprintf("DEBIAN_FRONTEND=noninteractive apt-get install -y %s", pkgList)); err != nil {
+	installCmd := "DEBIAN_FRONTEND=noninteractive apt-get install -y"
+	if b.isDebian() {
+		installCmd += " --no-install-recommends"
+	}
+
+	if err := b.chrootExec(fmt.Sprintf("%s %s", installCmd, pkgList)); err != nil {
 		return err
 	}
 
@@ -615,7 +628,66 @@ func (b *Builder) installDesktop() error {
 	// Cleanup
 	b.chrootExec("apt-get autoremove -y")
 
+	// GNOME-specific vanilla improvements (inspired by ubuntu-debullshit)
+	if b.Config.Packages.Desktop == "gnome" && !b.isDebian() {
+		b.refineVanillaGNOME()
+	}
+
 	return nil
+}
+
+// refineVanillaGNOME performs additional steps to ensure a vanilla GNOME experience on Ubuntu
+func (b *Builder) refineVanillaGNOME() error {
+	fmt.Println("[ACTION] Refining vanilla GNOME experience (Ubuntu)...")
+
+	scripts := []string{
+		// Remove Ubuntu-specific branding and themes
+		"apt-get purge -y ubuntu-session yaru-theme-gnome-shell yaru-theme-gtk yaru-theme-icon yaru-theme-sound || true",
+
+		// Ensure GNOME session is default
+		"update-alternatives --set gdm3-theme.desktop /usr/share/gnome-shell/theme/gnome-shell.css || true",
+
+		// Additional integration packages
+		"DEBIAN_FRONTEND=noninteractive apt-get install -y qgnomeplatform-qt5 qgnomeplatform-qt6 || true",
+	}
+
+	for _, script := range scripts {
+		if err := b.chrootExec(script); err != nil {
+			log.Printf("Warning during GNOME refinement: %v", err)
+		}
+	}
+	return nil
+}
+
+// setupFlatpak checks if Flatpak is enabled and installs it
+func (b *Builder) setupFlatpak() error {
+	if !b.Config.Packages.EnableFlatpak {
+		return nil
+	}
+	return b.installFlatpak()
+}
+
+// installFlatpak installs Flatpak and adds Flathub repository
+func (b *Builder) installFlatpak() error {
+	fmt.Println("[ACTION] Installing Flatpak and adding Flathub repository...")
+
+	pkgs := []string{"flatpak"}
+
+	// Add desktop-specific plugins only for GNOME and KDE
+	switch b.Config.Packages.Desktop {
+	case "gnome":
+		pkgs = append(pkgs, "gnome-software-plugin-flatpak")
+	case "kde":
+		pkgs = append(pkgs, "plasma-discover-backend-flatpak")
+	}
+
+	pkgList := strings.Join(pkgs, " ")
+	if err := b.chrootExec(fmt.Sprintf("DEBIAN_FRONTEND=noninteractive apt-get install -y %s", pkgList)); err != nil {
+		return err
+	}
+
+	// Add Flathub repository mandatorily
+	return b.chrootExec("flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo")
 }
 
 // configureBootloader sets up GRUB and creates boot files
