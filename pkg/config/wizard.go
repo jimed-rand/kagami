@@ -177,6 +177,25 @@ func RunWizard() (*Config, string, error) {
 	arch := promptChoice(reader, "Select architecture:", archOptions)
 	fmt.Println()
 
+	// --- Kernel ---------------------------------------------------------
+	fmt.Println("[ Kernel Selection ]")
+	var kernelOptions []WizardOption
+	if isDebian {
+		kernelOptions = []WizardOption{
+			{"linux-image-amd64", "Standard", "Default Debian kernel"},
+			{"linux-image-rt-amd64", "Real-time", "Real-time kernel for low latency tasks"},
+			{"linux-image-cloud-amd64", "Cloud", "Optimized for cloud/virtual environments"},
+		}
+	} else {
+		kernelOptions = []WizardOption{
+			{"linux-generic", "Generic", "Standard Ubuntu kernel (recommended)"},
+			{"linux-lowlatency", "Low-latency", "Reduced latency kernel (audio/pro-style)"},
+			{"linux-oem-24.04", "OEM", "Latest stabilized OEM kernel (better hardware support)"},
+		}
+	}
+	kernel := promptChoice(reader, "Select kernel:", kernelOptions)
+	fmt.Println()
+
 	// --- Additional Packages --------------------------------------------
 	fmt.Println("[ Additional Packages ]")
 	fmt.Println("  Enter additional packages (comma-separated), or press")
@@ -241,6 +260,7 @@ func RunWizard() (*Config, string, error) {
 		slideshow:       slideshow,
 		hostname:        hostname,
 		arch:            arch,
+		kernel:          kernel,
 		mirror:          mirror,
 		calamaresConfig: calamaresConfigPath,
 		blockSnapd:      blockSnapd,
@@ -312,6 +332,7 @@ type wizardParams struct {
 	blockSnapd      bool
 	enableFirewall  bool
 	enableFlatpak   bool
+	kernel          string
 }
 
 func buildWizardConfig(p wizardParams) *Config {
@@ -359,6 +380,7 @@ func buildWizardConfig(p wizardParams) *Config {
 			Additional:    additional,
 			Desktop:       p.desktop,
 			RemoveList:    removeList,
+			Kernel:        p.kernel,
 			EnableFlatpak: p.enableFlatpak,
 		},
 		Installer: InstallerConfig{

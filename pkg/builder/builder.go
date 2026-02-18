@@ -308,15 +308,32 @@ func (b *Builder) installPackages() error {
 		return err
 	}
 
-	// Install kernel
-	kernelPkg := "linux-generic"
-	if b.isDebian() {
-		kernelPkg = "linux-image-amd64"
-		if b.Config.System.Architecture == "arm64" {
-			kernelPkg = "linux-image-arm64"
+	// Install kernel and headers
+	kernelPkg := b.Config.Packages.Kernel
+	if kernelPkg == "" {
+		kernelPkg = "linux-generic"
+		if b.isDebian() {
+			kernelPkg = "linux-image-amd64"
+			if b.Config.System.Architecture == "arm64" {
+				kernelPkg = "linux-image-arm64"
+			}
 		}
 	}
-	if err := b.chrootExec(fmt.Sprintf("DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends %s", kernelPkg)); err != nil {
+
+	// Prepare headers package name
+	headersPkg := ""
+	if strings.HasPrefix(kernelPkg, "linux-image-") {
+		headersPkg = strings.Replace(kernelPkg, "linux-image-", "linux-headers-", 1)
+	} else if strings.HasPrefix(kernelPkg, "linux-") {
+		headersPkg = "linux-headers-" + strings.TrimPrefix(kernelPkg, "linux-")
+	}
+
+	installKernelCmd := fmt.Sprintf("DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends %s", kernelPkg)
+	if headersPkg != "" {
+		installKernelCmd += " " + headersPkg
+	}
+
+	if err := b.chrootExec(installKernelCmd); err != nil {
 		return err
 	}
 
@@ -719,17 +736,34 @@ func (b *Builder) installFlatpak() error {
 
 // configureBootloader sets up GRUB and creates boot files
 func (b *Builder) configureBootloader() error {
-	// Copy kernel and initrd
-	kernelPattern := filepath.Join(b.ChrootDir, "boot", "vmlinuz-*")
-	initrdPattern := filepath.Join(b.ChrootDir, "boot", "initrd.img-*")
-
-	// If Ubuntu, we might want to stay specific to avoid picking up older kernels if any
-	if !b.isDebian() {
-		kernelPattern = filepath.Join(b.ChrootDir, "boot", "vmlinuz-*-generic")
-		initrdPattern = filepath.Join(b.ChrootDir, "boot", "initrd.img-*-generic")
+	// Determine kernel suffix for better matching
+	suffix := "generic"
+	if b.isDebian() {
+		suffix = "amd64"
 	}
 
+	if b.Config.Packages.Kernel != "" {
+		if strings.Contains(b.Config.Packages.Kernel, "lowlatency") {
+			suffix = "lowlatency"
+		} else if strings.Contains(b.Config.Packages.Kernel, "oem") {
+			suffix = "oem"
+		} else if strings.Contains(b.Config.Packages.Kernel, "amd64") {
+			suffix = "amd64"
+		} else if strings.Contains(b.Config.Packages.Kernel, "rt") {
+			suffix = "rt"
+		}
+	}
+
+	kernelPattern := filepath.Join(b.ChrootDir, "boot", "vmlinuz-*"+suffix+"*")
+	initrdPattern := filepath.Join(b.ChrootDir, "boot", "initrd.img-*"+suffix+"*")
+
+	// Fallback to broad pattern if specific one fails
 	kernels, _ := filepath.Glob(kernelPattern)
+	if len(kernels) == 0 {
+		kernelPattern = filepath.Join(b.ChrootDir, "boot", "vmlinuz-*")
+		initrdPattern = filepath.Join(b.ChrootDir, "boot", "initrd.img-*")
+		kernels, _ = filepath.Glob(kernelPattern)
+	}
 	initrds, _ := filepath.Glob(initrdPattern)
 
 	if len(kernels) > 0 {

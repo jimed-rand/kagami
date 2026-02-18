@@ -61,6 +61,7 @@ type PackageConfig struct {
 	Additional    []string `json:"additional"`
 	Desktop       string   `json:"desktop"` // gnome, kde, xfce, lxde, mate, none
 	RemoveList    []string `json:"remove_list"`
+	Kernel        string   `json:"kernel"` // linux-generic, linux-lowlatency, etc.
 	EnableFlatpak bool     `json:"enable_flatpak"`
 }
 
@@ -131,6 +132,7 @@ func NewDefaultConfig(release string) *Config {
 				"apport",
 				"popularity-contest",
 			},
+			Kernel: "linux-generic",
 		},
 		Installer: InstallerConfig{
 			Type:      "ubiquity",
