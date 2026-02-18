@@ -8,6 +8,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
+
+	"kagami/pkg/system"
 )
 
 // createFilesystem creates the squashfs filesystem and manifest
@@ -74,7 +77,7 @@ func (b *Builder) createFilesystem() error {
 	fmt.Println("[STEP] Creating compressed filesystem (this may take several minutes)...")
 	squashfsPath := filepath.Join(b.ImageDir, "casper", "filesystem.squashfs")
 
-	cmd := exec.Command("mksquashfs",
+	args := []string{
 		b.ChrootDir,
 		squashfsPath,
 		"-noappend",
@@ -91,7 +94,16 @@ func (b *Builder) createFilesystem() error {
 		"-e", "tmp/.*",
 		"-e", "swapfile",
 		"-e", "image",
-	)
+	}
+
+	// In container environments or certain filesystems, POSIX ACLs/xattrs can cause errors
+	// (e.g., "Unrecognised xattr prefix system.posix_acl_access").
+	// Using -no-xattrs is safer and more compatible for live ISOs.
+	if system.IsContainer() {
+		args = append(args, "-no-xattrs")
+	}
+
+	cmd := exec.Command("mksquashfs", args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
@@ -117,18 +129,74 @@ func (b *Builder) createFilesystem() error {
 
 // createISO generates the final ISO image
 func (b *Builder) createISO() error {
-	fmt.Println("[STEP] Copying EFI loaders...")
+	fmt.Println("[STEP] Preparing boot loaders...")
 
-	// Copy EFI loaders
 	isolinuxDir := filepath.Join(b.ImageDir, "isolinux")
-	efiFiles := map[string]string{
-		"/usr/lib/shim/shimx64.efi.signed.previous":          filepath.Join(isolinuxDir, "bootx64.efi"),
-		"/usr/lib/shim/mmx64.efi":                            filepath.Join(isolinuxDir, "mmx64.efi"),
-		"/usr/lib/grub/x86_64-efi-signed/grubx64.efi.signed": filepath.Join(isolinuxDir, "grubx64.efi"),
+	if err := os.MkdirAll(isolinuxDir, 0755); err != nil {
+		return fmt.Errorf("failed to create isolinux directory: %v", err)
 	}
 
-	for src, dst := range efiFiles {
-		exec.Command("cp", src, dst).Run()
+	// Dynamic detection of EFI loaders to support diverse environments (Host/Container/Chroot)
+	copyFile := func(srcPaths []string, dstName string) bool {
+		dst := filepath.Join(isolinuxDir, dstName)
+		for _, path := range srcPaths {
+			// Check absolute path
+			if _, err := os.Stat(path); err == nil {
+				if exec.Command("cp", path, dst).Run() == nil {
+					return true
+				}
+			}
+			// Check relative to chroot
+			chrootPath := filepath.Join(b.ChrootDir, path)
+			if _, err := os.Stat(chrootPath); err == nil {
+				if exec.Command("cp", chrootPath, dst).Run() == nil {
+					return true
+				}
+			}
+		}
+		return false
+	}
+
+	fmt.Println("[STEP] Copying EFI loaders (Shim/GRUB)...")
+
+	// 1. Copy Shim (bootx64.efi)
+	shimPaths := []string{
+		"/usr/lib/shim/shimx64.efi.signed",
+		"/usr/lib/shim/shimx64.efi.signed.previous",
+		"/usr/lib/shim/shimx64.efi",
+		"/boot/efi/EFI/ubuntu/shimx64.efi",
+		"/usr/lib/shim/shim.efi",
+	}
+	if !copyFile(shimPaths, "bootx64.efi") {
+		log.Printf("[WARNING] Could not find shimx64.efi, UEFI Secure Boot might not work")
+	}
+
+	// 2. Copy MokManager (mmx64.efi)
+	mmPaths := []string{
+		"/usr/lib/shim/mmx64.efi",
+		"/usr/lib/shim/mmx64.efi.signed",
+		"/boot/efi/EFI/ubuntu/mmx64.efi",
+	}
+	copyFile(mmPaths, "mmx64.efi")
+
+	// 3. Copy GRUB EFI (grubx64.efi)
+	grubEfiPaths := []string{
+		"/usr/lib/grub/x86_64-efi-signed/grubx64.efi.signed",
+		"/usr/lib/grub/x86_64-efi/monolithic/grubx64.efi",
+		"/boot/efi/EFI/ubuntu/grubx64.efi",
+		"/usr/lib/grub/x86_64-efi/grub.efi",
+	}
+	if !copyFile(grubEfiPaths, "grubx64.efi") {
+		log.Printf("[WARNING] grubx64.efi not found in common locations, attempting fallback...")
+		// Fallback to searching anywhere in chroot
+		findCmd := exec.Command("find", b.ChrootDir, "-name", "grubx64.efi", "-o", "-name", "grubx64.efi.signed")
+		output, _ := findCmd.Output()
+		foundPaths := strings.Split(strings.TrimSpace(string(output)), "\n")
+		if len(foundPaths) > 0 && foundPaths[0] != "" {
+			exec.Command("cp", foundPaths[0], filepath.Join(isolinuxDir, "grubx64.efi")).Run()
+		} else {
+			return fmt.Errorf("mandatory file grubx64.efi not found")
+		}
 	}
 
 	fmt.Println("[STEP] Creating EFI boot image...")
@@ -234,14 +302,16 @@ func (b *Builder) createISO() error {
 	// Create ISO
 	hybridImg := "/usr/lib/grub/i386-pc/boot_hybrid.img"
 
-	distName := b.getDistName()
+	// Simplified Volume ID for better compatibility
+	volid := fmt.Sprintf("KAGAMI_%s_%s", strings.ToUpper(b.Config.Release), strings.ToUpper(b.Config.System.Architecture))
 
+	// Start building xorriso arguments
 	xorrisoArgs := []string{
 		"-as", "mkisofs",
 		"-iso-level", "3",
 		"-full-iso9660-filenames",
 		"-J", "-J", "-joliet-long",
-		"-volid", fmt.Sprintf("%s %s", distName, b.Config.Release),
+		"-volid", volid,
 		"-output", b.OutputISO,
 		"-eltorito-boot", "isolinux/bios.img",
 		"-no-emul-boot",
@@ -249,7 +319,17 @@ func (b *Builder) createISO() error {
 		"-boot-info-table",
 		"--eltorito-catalog", "boot.catalog",
 		"--grub2-boot-info",
-		"--grub2-mbr", hybridImg,
+	}
+
+	// Add BIOS hybrid MBR if available
+	if _, err := os.Stat(hybridImg); err == nil {
+		xorrisoArgs = append(xorrisoArgs, "--grub2-mbr", hybridImg)
+	} else {
+		log.Printf("[WARNING] BIOS hybrid image not found at %s, skipping --grub2-mbr", hybridImg)
+	}
+
+	// Continue with generic arguments
+	xorrisoArgs = append(xorrisoArgs,
 		"-partition_offset", "16",
 		"--mbr-force-bootable",
 		"-eltorito-alt-boot",
@@ -263,14 +343,27 @@ func (b *Builder) createISO() error {
 		"-e", "--interval:appended_partition_2:::",
 		"-exclude", "isolinux",
 		"-graft-points",
-		"/EFI/boot/bootx64.efi=" + filepath.Join(isolinuxDir, "bootx64.efi"),
-		"/EFI/boot/mmx64.efi=" + filepath.Join(isolinuxDir, "mmx64.efi"),
-		"/EFI/boot/grubx64.efi=" + filepath.Join(isolinuxDir, "grubx64.efi"),
-		"/EFI/ubuntu/grub.cfg=" + grubCfg,
-		"/isolinux/bios.img=" + biosImg,
-		"/isolinux/efiboot.img=" + efibootImg,
-		b.ImageDir,
+	)
+
+	// Add available EFI boot files
+	efiMap := map[string]string{
+		"/EFI/boot/bootx64.efi": filepath.Join(isolinuxDir, "bootx64.efi"),
+		"/EFI/boot/mmx64.efi":   filepath.Join(isolinuxDir, "mmx64.efi"),
+		"/EFI/boot/grubx64.efi": filepath.Join(isolinuxDir, "grubx64.efi"),
 	}
+	for isoPath, hostPath := range efiMap {
+		if _, err := os.Stat(hostPath); err == nil {
+			xorrisoArgs = append(xorrisoArgs, isoPath+"="+hostPath)
+		}
+	}
+
+	// Add mandatory files
+	xorrisoArgs = append(xorrisoArgs,
+		"/EFI/ubuntu/grub.cfg="+grubCfg,
+		"/isolinux/bios.img="+biosImg,
+		"/isolinux/efiboot.img="+efibootImg,
+		b.ImageDir,
+	)
 
 	cmd := exec.Command("xorriso", xorrisoArgs...)
 	cmd.Stdout = os.Stdout
@@ -279,19 +372,45 @@ func (b *Builder) createISO() error {
 	return cmd.Run()
 }
 
-// cleanup unmounts filesystems and removes temporary files
+// cleanup unmounts filesystems and clears temporary data
 func (b *Builder) cleanup() error {
-	// Unmount chroot filesystems
+	fmt.Println("[ACTION] Cleaning up mounts and temporary files...")
+
+	// Order matters for unmounting (innermost first)
 	mounts := []string{
+		filepath.Join(b.ChrootDir, "dev/pts"),
 		filepath.Join(b.ChrootDir, "dev"),
+		filepath.Join(b.ChrootDir, "proc"),
+		filepath.Join(b.ChrootDir, "sys"),
 		filepath.Join(b.ChrootDir, "run"),
 	}
 
 	for _, mount := range mounts {
-		exec.Command("umount", mount).Run()
+		if isMounted(mount) {
+			// Try unmounting several times if busy
+			for i := 0; i < 3; i++ {
+				cmd := exec.Command("umount", "-l", mount) // Use lazy unmount for robustness
+				if err := cmd.Run(); err == nil {
+					break
+				}
+				time.Sleep(500 * time.Millisecond)
+			}
+		}
 	}
 
 	return nil
+}
+
+// RemoveWorkspace deletes the entire workspace directory including chroot and image
+func (b *Builder) RemoveWorkspace() error {
+	fmt.Printf("[ACTION] Removing workspace directory: %s\n", b.WorkDir)
+
+	// Ensure everything is unmounted first
+	b.cleanup()
+
+	// Use rm -rf via exec to handle potential permission issues better than os.RemoveAll
+	cmd := exec.Command("rm", "-rf", b.WorkDir)
+	return cmd.Run()
 }
 
 // chrootExec executes a command inside the chroot environment

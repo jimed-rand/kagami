@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -167,10 +168,16 @@ func main() {
 		printBuildInfo(cfg, wizardWorkDir, wizardIsoPath)
 
 		if err := b.Build(); err != nil {
-			fatal("Build failed: %v", err)
+			fmt.Printf("\n[ERROR] %v\n", err)
+			offerCleanup(b, false)
+			os.Exit(1)
 		}
 
+		// Move ISO to safety before optional cleanup
+		wizardIsoPath = moveISOToSafety(wizardIsoPath, wizardWorkDir)
+
 		printBuildSuccess(wizardIsoPath)
+		offerCleanup(b, true)
 		os.Exit(0)
 	}
 
@@ -284,10 +291,16 @@ func main() {
 
 	// Run the build
 	if err := b.Build(); err != nil {
-		fatal("Build failed: %v", err)
+		fmt.Printf("\n[ERROR] %v\n", err)
+		offerCleanup(b, false)
+		os.Exit(1)
 	}
 
+	// Move ISO to safety before optional cleanup
+	isoPath = moveISOToSafety(isoPath, baseWorkDir)
+
 	printBuildSuccess(isoPath)
+	offerCleanup(b, true)
 }
 
 func printBuildInfo(cfg *config.Config, workDir, isoPath string) {
@@ -376,4 +389,71 @@ type politeLogger struct{}
 func (l *politeLogger) Write(p []byte) (n int, err error) {
 	timestamp := time.Now().Format("15:04:05")
 	return fmt.Printf("[%s] [INFO] %s", timestamp, string(p))
+}
+
+func offerCleanup(b *builder.Builder, success bool) {
+	reader := bufio.NewReader(os.Stdin)
+	var input string
+
+	if !success {
+		fmt.Println("\n---------------------------------------------------------------")
+		fmt.Println("            [!] Build failed. Cleanup Recommended              ")
+		fmt.Println("---------------------------------------------------------------")
+		fmt.Println("It is highly recommended to unmount filesystems to avoid issues.")
+		fmt.Print("Unmount and remove workspace? [Y/n]: ")
+		input, _ = reader.ReadString('\n')
+		if strings.ToLower(strings.TrimSpace(input)) != "n" {
+			b.RemoveWorkspace()
+		}
+		return
+	}
+
+	fmt.Print("\nBuild successful. Clean up workspace/chroot now? [y/N]: ")
+	input, _ = reader.ReadString('\n')
+	if strings.ToLower(strings.TrimSpace(input)) == "y" {
+		b.RemoveWorkspace()
+	}
+}
+
+// moveISOToSafety moves the generated ISO out of the workspace to the program directory
+// to prevent it from being deleted during cleanup.
+func moveISOToSafety(isoPath, workDir string) string {
+	absISO, _ := filepath.Abs(isoPath)
+	absWork, _ := filepath.Abs(workDir)
+
+	// If ISO is not in workspace, it's already safe
+	if !strings.HasPrefix(absISO, absWork) {
+		return isoPath
+	}
+
+	// Get executable directory
+	execPath, err := os.Executable()
+	if err != nil {
+		return isoPath
+	}
+	destDir := filepath.Dir(execPath)
+
+	// If running from system bin, use CWD instead
+	if strings.Contains(destDir, "/usr/bin") || strings.Contains(destDir, "/bin") {
+		destDir, _ = os.Getwd()
+	}
+
+	newPath := filepath.Join(destDir, filepath.Base(isoPath))
+	if absISO == newPath {
+		return isoPath
+	}
+
+	fmt.Printf("\n[ACTION] Moving ISO to safe location: %s\n", newPath)
+	// Try rename first
+	if err := os.Rename(isoPath, newPath); err != nil {
+		// Fallback to copy if rename fails (e.g. cross-device)
+		cmd := exec.Command("cp", isoPath, newPath)
+		if err := cmd.Run(); err != nil {
+			fmt.Printf("[WARNING] Failed to move ISO: %v\n", err)
+			return isoPath
+		}
+		os.Remove(isoPath)
+	}
+
+	return newPath
 }
