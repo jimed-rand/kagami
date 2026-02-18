@@ -45,6 +45,19 @@ func main() {
 		os.Exit(0)
 	}
 
+	// Show usage and version if no flags are provided
+	if flag.NFlag() == 0 {
+		fmt.Printf("%s %s - Vanilla ISO Builder\n", config.AppName, config.Version)
+		fmt.Printf("\nUsage:\n")
+		fmt.Printf("  sudo %s [options]\n", os.Args[0])
+		fmt.Printf("\nOptions:\n")
+		flag.PrintDefaults()
+		fmt.Printf("\nExamples:\n")
+		fmt.Printf("  sudo %s --wizard\n", os.Args[0])
+		fmt.Printf("  sudo %s --config examples/debian-bookworm-minimal-installer.json\n\n", os.Args[0])
+		os.Exit(0)
+	}
+
 	// Display banner
 	printBanner()
 

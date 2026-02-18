@@ -63,28 +63,50 @@ Required utilities include `debootstrap`, `squashfs-tools`, `xorriso`, `grub-pc-
 
 ## Operational Usage
 
-### 60-Second Quick Start
+### 1. Build and Prepare
 
-The following sequence facilitates immediate image generation:
-1. `make build`
-2. `sudo make install-deps`
-3. `sudo ./kagami`
-
-### Configuration Execution
-
-Standard ISO generation is initiated via the following command:
+First, build the Kagami binary. This generates a statically linked, portable binary:
 
 ```bash
-sudo ./kagami -config <path-to-configuration-json>
+make build
+```
+
+Then, ensure all required build dependencies are installed on your system:
+
+```bash
+sudo ./kagami --install-deps
+```
+
+### 2. Configuration Wizard (Recommended)
+
+Kagami includes an interactive wizard to help you design your custom ISO easily. It will guide you through selecting the distribution, desktop environment, kernel, and extra packages.
+
+```bash
+sudo ./kagami --wizard
+```
+
+**Workflow:**
+- The wizard generates a `.json` configuration file based on your choices.
+- At the end of the process, it will offer to **build the ISO immediately**.
+- Alternatively, you can choose to save the configuration and **build it later** manually.
+
+### 3. Manual Build Execution
+
+If you already have a configuration file, you can initiate the synthesis directly:
+
+```bash
+sudo ./kagami --config path/to/your-config.json
 ```
 
 ### Argument Specification
 
-- `-config`: Path to the JSON configuration file.
-- `-release`: Specifies the target Ubuntu release (e.g., noble, jammy, focal, resolute, or devel).
-- `-hostname`: Designates the network identifier for the target system.
-- `-output`: Defines the absolute path for the synthesized ISO file.
-- `-workdir`: Specifies the working directory (defaults to the configuration file's directory if provided).
+- `--wizard`: Launches the interactive configuration wizard.
+- `--config`: Path to the JSON configuration file.
+- `--install-deps`: Automatically installs all required system utilities.
+- `--check-deps`: Verifies if the system has all necessary build tools.
+- `--release`: Overrides the target release (e.g., noble, trixie, sid).
+- `--output`: Defines the absolute path for the synthesized ISO file.
+- `--workdir`: Specifies the working directory for the build process.
 
 ## Comparative Analysis of Vanilla Desktop Environments
 
