@@ -48,6 +48,32 @@ func main() {
 	// Show usage and version if no flags are provided
 	if flag.NFlag() == 0 {
 		fmt.Printf("%s %s - Vanilla ISO Builder\n", config.AppName, config.Version)
+		fmt.Printf("Synthesized utilizing the Go runtime %s for %s/%s\n", runtime.Version(), runtime.GOOS, runtime.GOARCH)
+
+		// Detect non-APT system and show appropriate warnings
+		if !system.IsAPTBased() {
+			fmt.Println()
+			fmt.Println("----------------------------------------------------------------")
+			fmt.Println("  [WARNING] NON-APT SYSTEM DETECTED")
+			fmt.Println()
+			fmt.Println("  Kagami is designed for Ubuntu/Debian (APT-based) only.")
+			fmt.Println("  Build, dependency, and installation features are disabled.")
+			fmt.Println()
+			fmt.Println("  On this system, only generating JSON configuration files")
+			fmt.Println("  via --wizard is supported.")
+			fmt.Println("----------------------------------------------------------------")
+			fmt.Println()
+			fmt.Println("[TIP] If you are on a non-APT distribution (Fedora, Arch, etc.), use Distrobox")
+			fmt.Println("      (Docker/Podman) to create an Ubuntu/Debian container. Ensure you map/use")
+			fmt.Printf("      your home folder so %s can access the build workspace correctly.\n", config.AppName)
+			fmt.Println()
+			fmt.Println("      Example:")
+			fmt.Println("        distrobox create --name kagami-box --image ubuntu:noble --home ~/distrobox-home")
+			fmt.Println("        distrobox enter kagami-box")
+			fmt.Printf("        sudo %s --wizard   # Generate config JSON inside the container\n", os.Args[0])
+			fmt.Println()
+		}
+
 		fmt.Printf("\nUsage:\n")
 		fmt.Printf("  sudo %s [options]\n", os.Args[0])
 		fmt.Printf("\nOptions:\n")
@@ -133,9 +159,8 @@ func main() {
 			fatal("Invalid configuration: %v", err)
 		}
 
-		var wizardWorkDir string
-		absPath, _ := filepath.Abs(outputPath)
-		wizardWorkDir = filepath.Join(filepath.Dir(absPath), "kagami-workspace")
+		// Use environment-aware work directory
+		_, wizardWorkDir := system.GetAppPaths()
 		wizardIsoPath := filepath.Join(wizardWorkDir, fmt.Sprintf("kagami-%s.iso", cfg.Release))
 
 		b := builder.NewBuilder(cfg, wizardWorkDir, wizardIsoPath)
@@ -183,6 +208,9 @@ func main() {
 	}
 	selectedRelease = inputRelease
 
+	// Get default paths based on environment (portable vs installed)
+	_, defaultWorkDir := system.GetAppPaths()
+
 	// Determine working directory
 	var baseWorkDir string
 	if *workDir != "" {
@@ -195,11 +223,7 @@ func main() {
 		}
 		baseWorkDir = filepath.Join(filepath.Dir(absPath), "kagami-workspace")
 	} else {
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			fatal("Failed to get user home directory: %v", err)
-		}
-		baseWorkDir = filepath.Join(homeDir, "kagami-workspace")
+		baseWorkDir = defaultWorkDir
 	}
 
 	// Determine output ISO path

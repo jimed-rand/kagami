@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"kagami/pkg/system"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -22,14 +23,14 @@ func RunWizard() (*Config, string, error) {
 	reader := bufio.NewReader(os.Stdin)
 
 	fmt.Println()
-	fmt.Println("╔══════════════════════════════════════════════════════════════╗")
-	fmt.Println("║              Kagami Configuration Wizard                     ║")
-	fmt.Println("║          Interactive ISO Build Configuration                 ║")
-	fmt.Println("╚══════════════════════════════════════════════════════════════╝")
+	fmt.Println("----------------------------------------------------------------")
+	fmt.Println("               Kagami Configuration Wizard")
+	fmt.Println("           Interactive ISO Build Configuration")
+	fmt.Println("----------------------------------------------------------------")
 	fmt.Println()
 
-	// ─── Step 1: Distribution ───────────────────────────────────────────
-	fmt.Println("┌─ Step 1: Distribution ──────────────────────────────────────┐")
+	// --- Distribution ---------------------------------------------------
+	fmt.Println("[ Distribution ]")
 	distOptions := []WizardOption{
 		{"ubuntu", "Ubuntu", "Ubuntu-based ISO (LTS or Rolling)"},
 		{"debian", "Debian", "Debian-based ISO (Stable, Testing, or Sid)"},
@@ -38,8 +39,8 @@ func RunWizard() (*Config, string, error) {
 	isDebian := distChoice == "debian"
 	fmt.Println()
 
-	// ─── Step 2: Release ────────────────────────────────────────────────
-	fmt.Println("┌─ Step 2: Release ───────────────────────────────────────────┐")
+	// --- Release --------------------------------------------------------
+	fmt.Println("[ Release ]")
 	var releaseOptions []WizardOption
 	if isDebian {
 		releaseOptions = []WizardOption{
@@ -58,8 +59,8 @@ func RunWizard() (*Config, string, error) {
 	release := promptChoice(reader, "Select release:", releaseOptions)
 	fmt.Println()
 
-	// ─── Step 3: Build Mode ─────────────────────────────────────────────
-	fmt.Println("┌─ Step 3: Build Mode ────────────────────────────────────────┐")
+	// --- Build Mode -----------------------------------------------------
+	fmt.Println("[ Build Mode ]")
 	modeOptions := []WizardOption{
 		{"desktop", "Desktop ISO", "Full desktop environment with installer"},
 		{"minimal", "Minimal Installer", "Minimal live environment (like ALCI) - boots into WM with Calamares installer only"},
@@ -68,17 +69,17 @@ func RunWizard() (*Config, string, error) {
 	isMinimal := buildMode == "minimal"
 	fmt.Println()
 
-	// ─── Step 4: Desktop / WM Selection ─────────────────────────────────
+	// --- Desktop / WM Selection -----------------------------------------
 	var desktop string
 	var additionalPkgs []string
 
 	if isMinimal {
 		// Minimal installer mode (ALCI-style)
-		fmt.Println("┌─ Step 4: Window Manager (Minimal Installer) ───────────────┐")
-		fmt.Println("│ The minimal installer boots into a lightweight WM with      │")
-		fmt.Println("│ Calamares auto-started. Similar to ALCI (Arch Linux         │")
-		fmt.Println("│ Calamares Installer).                                       │")
-		fmt.Println("└─────────────────────────────────────────────────────────────┘")
+		fmt.Println("[ Window Manager (Minimal Installer) ]")
+		fmt.Println("  The minimal installer boots into a lightweight WM with")
+		fmt.Println("  Calamares auto-started. Similar to ALCI (Arch Linux")
+		fmt.Println("  Calamares Installer).")
+		fmt.Println("----------------------------------------------------------------")
 
 		wmOptions := []WizardOption{
 			{"openbox", "Openbox", "Lightweight stacking WM (recommended, ~50MB)"},
@@ -90,7 +91,7 @@ func RunWizard() (*Config, string, error) {
 		desktop = "none"
 		additionalPkgs = getMinimalWMPackages(wmChoice, isDebian)
 	} else {
-		fmt.Println("┌─ Step 4: Desktop Environment ───────────────────────────────┐")
+		fmt.Println("[ Desktop Environment ]")
 		var desktopOptions []WizardOption
 
 		if isDebian {
@@ -118,25 +119,25 @@ func RunWizard() (*Config, string, error) {
 	}
 	fmt.Println()
 
-	// ─── Step 5: Installer ──────────────────────────────────────────────
+	// --- Installer ------------------------------------------------------
 	var installerType string
 	var slideshow string
 
 	if isMinimal {
 		// Minimal mode always uses Calamares
 		installerType = "calamares"
-		fmt.Println("┌─ Step 5: Installer ─────────────────────────────────────────┐")
-		fmt.Println("│ Minimal installer mode uses Calamares (auto-configured).    │")
-		fmt.Println("└─────────────────────────────────────────────────────────────┘")
+		fmt.Println("[ Installer ]")
+		fmt.Println("  Minimal installer mode uses Calamares (auto-configured).")
+		fmt.Println("----------------------------------------------------------------")
 	} else if isDebian {
 		// Debian defaults to Calamares
 		installerType = "calamares"
-		fmt.Println("┌─ Step 5: Installer ─────────────────────────────────────────┐")
-		fmt.Println("│ Debian uses Calamares as the default installer.             │")
-		fmt.Println("└─────────────────────────────────────────────────────────────┘")
+		fmt.Println("[ Installer ]")
+		fmt.Println("  Debian uses Calamares as the default installer.")
+		fmt.Println("----------------------------------------------------------------")
 	} else {
 		// Ubuntu: choice between ubiquity and calamares
-		fmt.Println("┌─ Step 5: Installer ─────────────────────────────────────────┐")
+		fmt.Println("[ Installer ]")
 		installerOptions := []WizardOption{
 			{"ubiquity", "Ubiquity", "Traditional Ubuntu installer (GTK-based)"},
 			{"calamares", "Calamares", "Universal installer framework (modern, distro-agnostic)"},
@@ -156,8 +157,8 @@ func RunWizard() (*Config, string, error) {
 	}
 	fmt.Println()
 
-	// ─── Step 6: Hostname ───────────────────────────────────────────────
-	fmt.Println("┌─ Step 6: System Settings ───────────────────────────────────┐")
+	// --- System Settings ------------------------------------------------
+	fmt.Println("[ System Settings ]")
 	defaultHostname := "ubuntu-kagami"
 	if isDebian {
 		defaultHostname = "debian-kagami"
@@ -168,7 +169,7 @@ func RunWizard() (*Config, string, error) {
 	hostname := promptString(reader, fmt.Sprintf("Hostname [%s]:", defaultHostname), defaultHostname)
 	fmt.Println()
 
-	// ─── Step 7: Architecture ───────────────────────────────────────────
+	// --- Architecture ---------------------------------------------------
 	archOptions := []WizardOption{
 		{"amd64", "amd64", "64-bit x86 (most common)"},
 		{"arm64", "arm64", "64-bit ARM"},
@@ -176,11 +177,11 @@ func RunWizard() (*Config, string, error) {
 	arch := promptChoice(reader, "Select architecture:", archOptions)
 	fmt.Println()
 
-	// ─── Step 8: Additional Packages ────────────────────────────────────
-	fmt.Println("┌─ Step 8: Additional Packages ───────────────────────────────┐")
-	fmt.Println("│ Enter additional packages (comma-separated), or press       │")
-	fmt.Println("│ Enter to use defaults.                                      │")
-	fmt.Println("└─────────────────────────────────────────────────────────────┘")
+	// --- Additional Packages --------------------------------------------
+	fmt.Println("[ Additional Packages ]")
+	fmt.Println("  Enter additional packages (comma-separated), or press")
+	fmt.Println("  Enter to use defaults.")
+	fmt.Println("----------------------------------------------------------------")
 	extraPkgsInput := promptString(reader, "Additional packages:", "")
 	if extraPkgsInput != "" {
 		for _, pkg := range strings.Split(extraPkgsInput, ",") {
@@ -192,7 +193,7 @@ func RunWizard() (*Config, string, error) {
 	}
 	fmt.Println()
 
-	// ─── Step 9: Mirror ─────────────────────────────────────────────────
+	// --- Mirror ---------------------------------------------------------
 	defaultMirror := "http://archive.ubuntu.com/ubuntu/"
 	if isDebian {
 		defaultMirror = "http://deb.debian.org/debian/"
@@ -200,25 +201,25 @@ func RunWizard() (*Config, string, error) {
 	mirror := promptString(reader, fmt.Sprintf("APT mirror [%s]:", defaultMirror), defaultMirror)
 	fmt.Println()
 
-	// ─── Step 10: Calamares Config Path ─────────────────────────────────
+	// --- Calamares Configuration ----------------------------------------
 	var calamaresConfigPath string
 	if installerType == "calamares" {
-		fmt.Println("┌─ Step 10: Calamares Configuration ──────────────────────────┐")
-		fmt.Println("│ Optionally provide a path to a custom Calamares config      │")
-		fmt.Println("│ directory. Leave empty to use defaults.                     │")
-		fmt.Println("└─────────────────────────────────────────────────────────────┘")
+		fmt.Println("[ Calamares Configuration ]")
+		fmt.Println("  Optionally provide a path to a custom Calamares config")
+		fmt.Println("  directory. Leave empty to use defaults.")
+		fmt.Println("----------------------------------------------------------------")
 		calamaresConfigPath = promptString(reader, "Calamares config path (optional):", "")
 	}
 	fmt.Println()
 
-	// ─── Step 11: Application Support ─────────────────────────────────────
-	fmt.Println("┌─ Step 11: Application Support ──────────────────────────────┐")
+	// --- Application Support --------------------------------------------
+	fmt.Println("[ Application Support ]")
 	enableFlatpakStr := promptString(reader, "Enable Flatpak support? [Y/n]:", "Y")
 	enableFlatpak := strings.ToLower(enableFlatpakStr) != "n"
 	fmt.Println()
 
-	// ─── Step 12: Security Options ──────────────────────────────────────
-	fmt.Println("┌─ Step 12: Security ─────────────────────────────────────────┐")
+	// --- Security -------------------------------------------------------
+	fmt.Println("[ Security ]")
 	blockSnapd := true
 	if !isDebian {
 		blockSnapdStr := promptString(reader, "Block snapd? [Y/n]:", "Y")
@@ -229,7 +230,7 @@ func RunWizard() (*Config, string, error) {
 	enableFirewall = strings.ToLower(fwStr) == "y"
 	fmt.Println()
 
-	// ─── Build the Config ───────────────────────────────────────────────
+	// --- Generate Configuration -----------------------------------------
 	cfg := buildWizardConfig(wizardParams{
 		release:         release,
 		isDebian:        isDebian,
@@ -247,24 +248,34 @@ func RunWizard() (*Config, string, error) {
 		enableFlatpak:   enableFlatpak,
 	})
 
-	// ─── Step 13: Output File ───────────────────────────────────────────
-	fmt.Println("┌─ Step 13: Save Configuration ───────────────────────────────┐")
+	// --- Save Configuration ---------------------------------------------
+	fmt.Println("[ Save Configuration ]")
 	defaultOutputName := fmt.Sprintf("kagami-%s-%s.json", release, desktop)
 	if isMinimal {
 		defaultOutputName = fmt.Sprintf("kagami-%s-minimal-installer.json", release)
 	}
-	outputPath := promptString(reader, fmt.Sprintf("Output file [%s]:", defaultOutputName), defaultOutputName)
+
+	configDir, _ := system.GetAppPaths()
+	// Ensure directory exists
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		fmt.Printf("[WARNING] Failed to create config directory %s: %v\n", configDir, err)
+		// Fallback to current directory
+		configDir = "."
+	}
+
+	defaultOutputPath := filepath.Join(configDir, defaultOutputName)
+	outputPath := promptString(reader, fmt.Sprintf("Output file [%s]:", defaultOutputPath), defaultOutputPath)
 	fmt.Println()
 
-	// ─── Preview ────────────────────────────────────────────────────────
+	// --- Preview --------------------------------------------------------
 	prettyJSON, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to marshal config: %v", err)
 	}
 
-	fmt.Println("╔══════════════════════════════════════════════════════════════╗")
-	fmt.Println("║                  Configuration Preview                      ║")
-	fmt.Println("╚══════════════════════════════════════════════════════════════╝")
+	fmt.Println("----------------------------------------------------------------")
+	fmt.Println("                   Configuration Preview")
+	fmt.Println("----------------------------------------------------------------")
 	fmt.Println(string(prettyJSON))
 	fmt.Println()
 
@@ -470,7 +481,7 @@ func getMinimalWMPackages(wm string, isDebian bool) []string {
 	return base
 }
 
-// ─── Helper functions ───────────────────────────────────────────────────────
+// --- Helper functions -------------------------------------------------------
 
 func promptChoice(reader *bufio.Reader, prompt string, options []WizardOption) string {
 	fmt.Println(prompt)

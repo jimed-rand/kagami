@@ -9,8 +9,36 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
+
+// GetAppPaths returns the base directory for configuration and workspace
+// based on whether the application is running in portable mode or system-installed mode.
+func GetAppPaths() (configDir, workDir string) {
+	execPath, err := os.Executable()
+	if err != nil {
+		execPath = "."
+	}
+
+	absExecPath, err := filepath.Abs(execPath)
+	if err != nil {
+		absExecPath = execPath
+	}
+
+	execDir := filepath.Dir(absExecPath)
+	// Check if running from system binaries
+	isSystemPath := strings.HasPrefix(execDir, "/usr/bin") || strings.HasPrefix(execDir, "/bin") || strings.HasPrefix(execDir, "/usr/local/bin")
+
+	if isSystemPath {
+		homeDir, _ := os.UserHomeDir()
+		base := filepath.Join(homeDir, "kagami")
+		return filepath.Join(base, "config"), filepath.Join(base, "workspace")
+	}
+
+	// Portable mode: use executable directory
+	return execDir, filepath.Join(execDir, "kagami-workspace")
+}
 
 // Dependencies represents system dependencies status
 type Dependencies struct {
