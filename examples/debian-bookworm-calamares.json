@@ -1,0 +1,58 @@
+{
+  "release": "bookworm",
+  "system": {
+    "hostname": "debian-kagami",
+    "block_snapd": true,
+    "architecture": "amd64",
+    "locale": "en_US.UTF-8",
+    "timezone": "UTC"
+  },
+  "repository": {
+    "mirror": "http://deb.debian.org/debian/",
+    "use_proposed": false
+  },
+  "packages": {
+    "essential": [
+      "sudo",
+      "casper",
+      "discover",
+      "laptop-detect",
+      "os-prober",
+      "network-manager",
+      "net-tools",
+      "wireless-tools",
+      "wpagui",
+      "locales",
+      "grub-common",
+      "grub-gfxpayload-lists",
+      "grub-pc",
+      "grub-pc-bin",
+      "grub2-common",
+      "grub-efi-amd64",
+      "shim-signed",
+      "mtools",
+      "binutils"
+    ],
+    "additional": [
+      "vim",
+      "curl",
+      "wget",
+      "git",
+      "htop"
+    ],
+    "desktop": "xfce",
+    "remove_list": []
+  },
+  "installer": {
+    "type": "calamares",
+    "calamares_config": ""
+  },
+  "network": {
+    "manager": "network-manager"
+  },
+  "security": {
+    "enable_firewall": false,
+    "block_snapd_forever": true,
+    "disable_services": []
+  }
+}

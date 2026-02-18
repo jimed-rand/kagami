@@ -31,6 +31,37 @@ func NewBuilder(cfg *config.Config, workDir, outputISO string) *Builder {
 	}
 }
 
+// isDebian returns true if the release is a Debian release
+func (b *Builder) isDebian() bool {
+	debianReleases := map[string]bool{
+		"bookworm": true,
+		"trixie":   true,
+		"sid":      true,
+	}
+	return debianReleases[b.Config.Release]
+}
+
+// getDistName returns the descriptive name of the distribution
+func (b *Builder) getDistName() string {
+	switch b.Config.Release {
+	case "focal", "jammy", "noble", "resolute":
+		return "Ubuntu LTS"
+	case "devel":
+		return "Ubuntu Rolling"
+	case "bookworm":
+		return "Debian Stable"
+	case "trixie":
+		return "Debian Testing"
+	case "sid":
+		return "Debian Sid"
+	default:
+		if b.isDebian() {
+			return "Debian Custom"
+		}
+		return "Ubuntu Custom"
+	}
+}
+
 // Build executes the complete build process
 func (b *Builder) Build() error {
 	steps := []struct {
@@ -117,7 +148,11 @@ func (b *Builder) bootstrapSystem() error {
 
 	mirror := b.Config.Repository.Mirror
 	if mirror == "" {
-		mirror = "http://archive.ubuntu.com/ubuntu/"
+		if b.isDebian() {
+			mirror = "http://deb.debian.org/debian/"
+		} else {
+			mirror = "http://archive.ubuntu.com/ubuntu/"
+		}
 	}
 
 	// If running devel, we bootstrap the latest LTS first
@@ -246,7 +281,14 @@ func (b *Builder) installPackages() error {
 	}
 
 	// Install kernel
-	if err := b.chrootExec("DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends linux-generic"); err != nil {
+	kernelPkg := "linux-generic"
+	if b.isDebian() {
+		kernelPkg = "linux-image-amd64"
+		if b.Config.System.Architecture == "arm64" {
+			kernelPkg = "linux-image-arm64"
+		}
+	}
+	if err := b.chrootExec(fmt.Sprintf("DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends %s", kernelPkg)); err != nil {
 		return err
 	}
 
@@ -413,6 +455,37 @@ func (b *Builder) installDesktop() error {
 			}
 		}
 
+		// Install calamares if requested
+		if b.Config.Installer.Type == "calamares" {
+			installerPkgs := []string{
+				"calamares",
+				"calamares-settings-debian", // Default for Debian-based
+			}
+
+			// Adjust for Ubuntu-based if not Debian
+			if !b.isDebian() {
+				installerPkgs = []string{
+					"calamares",
+					"calamares-settings-ubuntu",
+				}
+			}
+
+			installerList := strings.Join(installerPkgs, " ")
+			if err := b.chrootExec(fmt.Sprintf("DEBIAN_FRONTEND=noninteractive apt-get install -y %s", installerList)); err != nil {
+				log.Printf("Warning: Calamares failed to install: %v", err)
+			}
+
+			// Apply custom Calamares configuration if provided
+			if err := b.applyCalamaresConfig(); err != nil {
+				log.Printf("Warning: Failed to apply Calamares configuration: %v", err)
+			}
+
+			// Configure minimal installer autostart (ALCI-style)
+			if err := b.configureMinimalInstaller(); err != nil {
+				log.Printf("Warning: Failed to configure minimal installer: %v", err)
+			}
+		}
+
 		// Remove unwanted packages
 		if len(b.Config.Packages.RemoveList) > 0 {
 			removeList := strings.Join(b.Config.Packages.RemoveList, " ")
@@ -446,6 +519,30 @@ func (b *Builder) installDesktop() error {
 		},
 	}
 
+	// Override for Debian
+	if b.isDebian() {
+		desktopPackages = map[string][]string{
+			"gnome": {
+				"task-gnome-desktop",
+			},
+			"kde": {
+				"task-kde-desktop",
+			},
+			"xfce": {
+				"task-xfce-desktop",
+			},
+			"lxde": {
+				"task-lxde-desktop",
+			},
+			"lxqt": {
+				"task-lxqt-desktop",
+			},
+			"mate": {
+				"task-mate-desktop",
+			},
+		}
+	}
+
 	pkgs, ok := desktopPackages[b.Config.Packages.Desktop]
 	if !ok {
 		return fmt.Errorf("unknown desktop environment: %s", b.Config.Packages.Desktop)
@@ -470,9 +567,7 @@ func (b *Builder) installDesktop() error {
 			log.Printf("Warning: Some installer packages failed to install: %v", err)
 		}
 
-		// Remove unnecessary slideshows to reduce bloat as requested
-		// We keep only the one matching the desktop if possible, or none if user wants "clean"
-		// The user said "jangan disertakan dengan slide yang tidak diperlukan"
+		// Remove unnecessary slideshows
 		slideshowsToRemove := []string{
 			"ubiquity-slideshow-kubuntu",
 			"ubiquity-slideshow-xubuntu",
@@ -484,6 +579,31 @@ func (b *Builder) installDesktop() error {
 
 		purgeList := strings.Join(slideshowsToRemove, " ")
 		b.chrootExec(fmt.Sprintf("apt-get purge -y %s || true", purgeList))
+	}
+
+	// Install calamares if requested (for non-'none' desktop)
+	if b.Config.Installer.Type == "calamares" {
+		installerPkgs := []string{
+			"calamares",
+			"calamares-settings-debian",
+		}
+
+		if !b.isDebian() {
+			installerPkgs = []string{
+				"calamares",
+				"calamares-settings-ubuntu",
+			}
+		}
+
+		installerList := strings.Join(installerPkgs, " ")
+		if err := b.chrootExec(fmt.Sprintf("DEBIAN_FRONTEND=noninteractive apt-get install -y %s", installerList)); err != nil {
+			log.Printf("Warning: Calamares failed to install: %v", err)
+		}
+
+		// Apply custom Calamares configuration
+		if err := b.applyCalamaresConfig(); err != nil {
+			log.Printf("Warning: Failed to apply Calamares configuration: %v", err)
+		}
 	}
 
 	// Remove unwanted packages
@@ -501,13 +621,20 @@ func (b *Builder) installDesktop() error {
 // configureBootloader sets up GRUB and creates boot files
 func (b *Builder) configureBootloader() error {
 	// Copy kernel and initrd
-	kernelPattern := filepath.Join(b.ChrootDir, "boot", "vmlinuz-*-generic")
-	initrdPattern := filepath.Join(b.ChrootDir, "boot", "initrd.img-*-generic")
+	kernelPattern := filepath.Join(b.ChrootDir, "boot", "vmlinuz-*")
+	initrdPattern := filepath.Join(b.ChrootDir, "boot", "initrd.img-*")
+
+	// If Ubuntu, we might want to stay specific to avoid picking up older kernels if any
+	if !b.isDebian() {
+		kernelPattern = filepath.Join(b.ChrootDir, "boot", "vmlinuz-*-generic")
+		initrdPattern = filepath.Join(b.ChrootDir, "boot", "initrd.img-*-generic")
+	}
 
 	kernels, _ := filepath.Glob(kernelPattern)
 	initrds, _ := filepath.Glob(initrdPattern)
 
 	if len(kernels) > 0 {
+		// Sort or pick the latest? For simplicity, pick the first match for now
 		exec.Command("cp", kernels[0], filepath.Join(b.ImageDir, "casper", "vmlinuz")).Run()
 	}
 	if len(initrds) > 0 {
@@ -541,7 +668,25 @@ func (b *Builder) configureBootloader() error {
 
 // generateGrubConfig creates GRUB menu configuration
 func (b *Builder) generateGrubConfig() string {
-	return `
+	distName := b.getDistName()
+
+	installEntry := ""
+	switch b.Config.Installer.Type {
+	case "ubiquity":
+		installEntry = fmt.Sprintf(`
+menuentry "Install %s" {
+   linux /casper/vmlinuz boot=casper only-ubiquity quiet splash ---
+   initrd /casper/initrd
+}`, distName)
+	case "calamares":
+		installEntry = fmt.Sprintf(`
+menuentry "Install %s" {
+   linux /casper/vmlinuz boot=casper quiet splash ---
+   initrd /casper/initrd
+}`, distName)
+	}
+
+	return fmt.Sprintf(`
 search --set=root --file /ubuntu
 
 insmod all_video
@@ -549,15 +694,11 @@ insmod all_video
 set default="0"
 set timeout=30
 
-menuentry "Try Ubuntu Custom without installing" {
+menuentry "Try %s without installing" {
    linux /casper/vmlinuz boot=casper nopersistent toram quiet splash ---
    initrd /casper/initrd
 }
-
-menuentry "Install Ubuntu Custom" {
-   linux /casper/vmlinuz boot=casper only-ubiquity quiet splash ---
-   initrd /casper/initrd
-}
+%s
 
 menuentry "Check disc for defects" {
    linux /casper/vmlinuz boot=casper integrity-check quiet splash ---
@@ -578,7 +719,7 @@ menuentry "Test memory Memtest86+ (BIOS)" {
    linux16 /install/memtest86+.bin
 }
 fi
-`
+`, distName, installEntry)
 }
 
 // cleanupChroot performs cleanup before creating filesystem image
@@ -601,4 +742,160 @@ func (b *Builder) cleanupChroot() error {
 	return nil
 }
 
-// Continued in next part...
+// applyCalamaresConfig copies custom Calamares configuration to the chroot
+func (b *Builder) applyCalamaresConfig() error {
+	if b.Config.Installer.CalamaresConfig == "" {
+		return nil
+	}
+
+	fmt.Printf("[ACTION] Applying custom Calamares configuration from %s...\n", b.Config.Installer.CalamaresConfig)
+
+	// Source path on host
+	srcPath := b.Config.Installer.CalamaresConfig
+	if !filepath.IsAbs(srcPath) {
+		cwd, _ := os.Getwd()
+		srcPath = filepath.Join(cwd, srcPath)
+	}
+
+	// Target path in chroot (usually /etc/calamares)
+	destPath := filepath.Join(b.ChrootDir, "etc", "calamares")
+
+	// Create directory if it doesn't exist
+	if err := os.MkdirAll(destPath, 0755); err != nil {
+		return fmt.Errorf("failed to create calamares config directory: %v", err)
+	}
+
+	// Copy files
+	// Note: We use shell to handle globbing if source is a directory content
+	cmd := exec.Command("bash", "-c", fmt.Sprintf("cp -rv %s/* %s/", srcPath, destPath))
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	return cmd.Run()
+}
+
+// configureMinimalInstaller sets up the ALCI-style minimal live environment
+// where a lightweight WM auto-starts and Calamares is launched automatically.
+// This mimics the approach used by ALCI (Arch Linux Calamares Installer):
+//   - LightDM autologin to a 'live' user
+//   - XDG autostart .desktop file to launch Calamares
+//   - Openbox autostart (if openbox is the WM)
+//   - Polkit rule so Calamares can run without manual auth prompt
+func (b *Builder) configureMinimalInstaller() error {
+	fmt.Println("[ACTION] Configuring minimal installer environment (ALCI-style)...")
+
+	scripts := []string{
+		// Create a live user for the live session
+		"useradd -m -G sudo -s /bin/bash live || true",
+		"echo 'live:live' | chpasswd",
+		"echo 'live ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/live",
+
+		// Configure LightDM autologin
+		"mkdir -p /etc/lightdm/lightdm.conf.d",
+		`cat > /etc/lightdm/lightdm.conf.d/50-autologin.conf <<'EOF'
+[Seat:*]
+autologin-user=live
+autologin-user-timeout=0
+autologin-session=openbox
+user-session=openbox
+EOF`,
+
+		// Create XDG autostart entry for Calamares (works for any WM/DE)
+		"mkdir -p /etc/xdg/autostart",
+		`cat > /etc/xdg/autostart/calamares-installer.desktop <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Install System
+Comment=Launch Calamares Installer
+Exec=sudo calamares
+Icon=calamares
+Terminal=false
+Categories=System;
+X-GNOME-Autostart-enabled=true
+NoDisplay=false
+EOF`,
+
+		// Create Openbox autostart (for Openbox-based minimal ISOs)
+		"mkdir -p /etc/xdg/openbox",
+		`cat > /etc/xdg/openbox/autostart <<'EOFSCRIPT'
+#!/bin/bash
+# ALCI-style minimal installer autostart
+# Start a panel for basic navigation
+tint2 &
+
+# Set wallpaper
+feh --bg-fill /usr/share/backgrounds/default.png 2>/dev/null || xsetroot -solid "#2d2d2d" &
+
+# Start notification daemon
+dunst &
+
+# Start polkit agent
+lxpolkit &
+
+# Start network manager applet
+nm-applet &
+
+# Wait for desktop to settle
+sleep 2
+
+# Launch Calamares installer
+sudo calamares &
+EOFSCRIPT`,
+
+		"chmod +x /etc/xdg/openbox/autostart",
+
+		// Create a polkit rule so Calamares can run without password prompt
+		"mkdir -p /etc/polkit-1/localauthority/50-local.d",
+		`cat > /etc/polkit-1/localauthority/50-local.d/allow-calamares.pkla <<'EOF'
+[Allow Calamares]
+Identity=unix-user:live
+Action=*
+ResultAny=yes
+ResultInactive=yes
+ResultActive=yes
+EOF`,
+
+		// Create desktop shortcut for Calamares on the desktop
+		"mkdir -p /home/live/Desktop",
+		`cat > /home/live/Desktop/install-system.desktop <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Install System
+Comment=Launch the system installer
+Exec=sudo calamares
+Icon=calamares
+Terminal=false
+Categories=System;
+EOF`,
+
+		"chmod +x /home/live/Desktop/install-system.desktop",
+		"chown -R live:live /home/live",
+
+		// Create a simple README on the desktop
+		`cat > /home/live/Desktop/README.txt <<'EOF'
+Welcome to the Kagami Minimal Installer!
+
+This is a minimal live environment designed for system installation.
+The Calamares installer should start automatically.
+
+If it doesn't start, double-click "Install System" on the desktop
+or run: sudo calamares
+
+After installation, remove the USB/CD and reboot.
+EOF`,
+
+		"chown live:live /home/live/Desktop/README.txt",
+
+		// Enable LightDM
+		"systemctl enable lightdm || true",
+	}
+
+	for _, script := range scripts {
+		if err := b.chrootExec(script); err != nil {
+			log.Printf("Warning during minimal installer setup: %v", err)
+		}
+	}
+
+	fmt.Println("[SUCCESS] Minimal installer environment configured (ALCI-style)")
+	return nil
+}

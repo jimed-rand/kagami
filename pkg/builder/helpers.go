@@ -28,7 +28,7 @@ func (b *Builder) createFilesystem() error {
 
 	// Create desktop manifest (remove installer packages)
 	manifestContent := output
-	removePackages := []string{"ubiquity", "casper", "discover", "laptop-detect", "os-prober"}
+	removePackages := []string{"ubiquity", "calamares", "casper", "discover", "laptop-detect", "os-prober"}
 	for _, pkg := range removePackages {
 		lines := strings.Split(manifestContent, "\n")
 		var filteredLines []string
@@ -46,7 +46,8 @@ func (b *Builder) createFilesystem() error {
 
 	// Create diskdefines
 	diskdefinesPath := filepath.Join(b.ImageDir, "README.diskdefines")
-	diskdefines := fmt.Sprintf(`#define DISKNAME  Ubuntu Custom %s
+	distName := b.getDistName()
+	diskdefines := fmt.Sprintf(`#define DISKNAME  %s %s
 #define TYPE  binary
 #define TYPEbinary  1
 #define ARCH  %s
@@ -55,7 +56,7 @@ func (b *Builder) createFilesystem() error {
 #define DISKNUM1  1
 #define TOTALNUM  0
 #define TOTALNUM0  1
-`, b.Config.Release, b.Config.System.Architecture)
+`, distName, b.Config.Release, b.Config.System.Architecture)
 
 	if err := os.WriteFile(diskdefinesPath, []byte(diskdefines), 0644); err != nil {
 		return err
@@ -233,12 +234,14 @@ func (b *Builder) createISO() error {
 	// Create ISO
 	hybridImg := "/usr/lib/grub/i386-pc/boot_hybrid.img"
 
+	distName := b.getDistName()
+
 	xorrisoArgs := []string{
 		"-as", "mkisofs",
 		"-iso-level", "3",
 		"-full-iso9660-filenames",
 		"-J", "-J", "-joliet-long",
-		"-volid", fmt.Sprintf("Ubuntu Custom %s", b.Config.Release),
+		"-volid", fmt.Sprintf("%s %s", distName, b.Config.Release),
 		"-output", b.OutputISO,
 		"-eltorito-boot", "isolinux/bios.img",
 		"-no-emul-boot",
@@ -310,10 +313,34 @@ func (b *Builder) chrootExecOutput(command string) (string, error) {
 func (b *Builder) generateSourcesList() string {
 	mirror := b.Config.Repository.Mirror
 	if mirror == "" {
-		mirror = "http://archive.ubuntu.com/ubuntu/"
+		if b.isDebian() {
+			mirror = "http://deb.debian.org/debian/"
+		} else {
+			mirror = "http://archive.ubuntu.com/ubuntu/"
+		}
 	}
 
-	sourcesContent := fmt.Sprintf(`cat > /etc/apt/sources.list <<'EOF'
+	var sourcesContent string
+	if b.isDebian() {
+		sourcesContent = fmt.Sprintf(`cat > /etc/apt/sources.list <<'EOF'
+deb %s %s main contrib non-free non-free-firmware
+deb-src %s %s main contrib non-free non-free-firmware
+
+deb %s %s-updates main contrib non-free non-free-firmware
+deb-src %s %s-updates main contrib non-free non-free-firmware
+
+deb http://security.debian.org/debian-security %s-security main contrib non-free non-free-firmware
+deb-src http://security.debian.org/debian-security %s-security main contrib non-free non-free-firmware
+`,
+			mirror, b.Config.Release,
+			mirror, b.Config.Release,
+			mirror, b.Config.Release,
+			mirror, b.Config.Release,
+			b.Config.Release,
+			b.Config.Release,
+		)
+	} else {
+		sourcesContent = fmt.Sprintf(`cat > /etc/apt/sources.list <<'EOF'
 deb %s %s main restricted universe multiverse
 deb-src %s %s main restricted universe multiverse
 
@@ -323,13 +350,14 @@ deb-src %s %s-security main restricted universe multiverse
 deb %s %s-updates main restricted universe multiverse
 deb-src %s %s-updates main restricted universe multiverse
 `,
-		mirror, b.Config.Release,
-		mirror, b.Config.Release,
-		mirror, b.Config.Release,
-		mirror, b.Config.Release,
-		mirror, b.Config.Release,
-		mirror, b.Config.Release,
-	)
+			mirror, b.Config.Release,
+			mirror, b.Config.Release,
+			mirror, b.Config.Release,
+			mirror, b.Config.Release,
+			mirror, b.Config.Release,
+			mirror, b.Config.Release,
+		)
+	}
 
 	// Add proposed if requested
 	if b.Config.Repository.UseProposed {

@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"kagami/pkg/builder"
@@ -27,6 +29,7 @@ func main() {
 		checkDeps   = flag.Bool("check-deps", false, "Check system dependencies")
 		installDeps = flag.Bool("install-deps", false, "Install missing dependencies (requires sudo)")
 		mirrorURL   = flag.String("mirror", "", "Custom Ubuntu mirror URL (e.g. http://archive.ubuntu.com/ubuntu/)")
+		wizardMode  = flag.Bool("wizard", false, "Launch interactive configuration wizard")
 	)
 
 	flag.Parse()
@@ -85,6 +88,48 @@ func main() {
 			fatal("Failed to install dependencies: %v", err)
 		}
 		fmt.Println(" All dependencies installed successfully")
+		os.Exit(0)
+	}
+
+	// Interactive wizard mode
+	if *wizardMode {
+		cfg, outputPath, err := config.RunWizard()
+		if err != nil {
+			fatal("Wizard failed: %v", err)
+		}
+		if outputPath == "" {
+			os.Exit(0)
+		}
+
+		// Ask if user wants to build now
+		reader := bufio.NewReader(os.Stdin)
+		fmt.Print("\nDo you want to build the ISO now? [y/N]: ")
+		input, _ := reader.ReadString('\n')
+		input = strings.TrimSpace(input)
+		if strings.ToLower(input) != "y" {
+			fmt.Println("\nYou can build later with:")
+			fmt.Printf("  sudo kagami --config %s\n\n", outputPath)
+			os.Exit(0)
+		}
+
+		// Proceed to build with the generated config
+		if err := cfg.Validate(); err != nil {
+			fatal("Invalid configuration: %v", err)
+		}
+
+		var wizardWorkDir string
+		absPath, _ := filepath.Abs(outputPath)
+		wizardWorkDir = filepath.Join(filepath.Dir(absPath), "kagami-workspace")
+		wizardIsoPath := filepath.Join(wizardWorkDir, fmt.Sprintf("kagami-%s.iso", cfg.Release))
+
+		b := builder.NewBuilder(cfg, wizardWorkDir, wizardIsoPath)
+		printBuildInfo(cfg, wizardWorkDir, wizardIsoPath)
+
+		if err := b.Build(); err != nil {
+			fatal("Build failed: %v", err)
+		}
+
+		printBuildSuccess(wizardIsoPath)
 		os.Exit(0)
 	}
 
@@ -189,17 +234,7 @@ func main() {
 	b := builder.NewBuilder(cfg, baseWorkDir, isoPath)
 
 	// Print build information
-	fmt.Println("---------------------------------------------------------------")
-	fmt.Printf("               %s - Ubuntu ISO Builder %s               \n", config.AppName, config.Version)
-	fmt.Println("---------------------------------------------------------------")
-	fmt.Printf("\n[INFO] Build Configuration:\n")
-	fmt.Printf("  Release:      %s\n", cfg.Release)
-	fmt.Printf("  Workspace:    %s\n", baseWorkDir)
-	fmt.Printf("  Output ISO:   %s\n", isoPath)
-	fmt.Printf("  Block Snapd:  %v\n", cfg.System.BlockSnapd)
-	fmt.Printf("  Desktop:      %s\n", getDesktopDescription(cfg))
-	fmt.Printf("  Installer:    %s\n", cfg.Installer.Type)
-	fmt.Println()
+	printBuildInfo(cfg, baseWorkDir, isoPath)
 
 	if *interactive {
 		if err := b.InteractivePackageSelection(); err != nil {
@@ -212,6 +247,24 @@ func main() {
 		fatal("Build failed: %v", err)
 	}
 
+	printBuildSuccess(isoPath)
+}
+
+func printBuildInfo(cfg *config.Config, workDir, isoPath string) {
+	fmt.Println("---------------------------------------------------------------")
+	fmt.Printf("               %s - Ubuntu ISO Builder %s               \n", config.AppName, config.Version)
+	fmt.Println("---------------------------------------------------------------")
+	fmt.Printf("\n[INFO] Build Configuration:\n")
+	fmt.Printf("  Release:      %s\n", cfg.Release)
+	fmt.Printf("  Workspace:    %s\n", workDir)
+	fmt.Printf("  Output ISO:   %s\n", isoPath)
+	fmt.Printf("  Block Snapd:  %v\n", cfg.System.BlockSnapd)
+	fmt.Printf("  Desktop:      %s\n", getDesktopDescription(cfg))
+	fmt.Printf("  Installer:    %s\n", cfg.Installer.Type)
+	fmt.Println()
+}
+
+func printBuildSuccess(isoPath string) {
 	fmt.Println("\n---------------------------------------------------------------")
 	fmt.Println("            [SUCCESS] Build Completed Successfully!            ")
 	fmt.Println("---------------------------------------------------------------")
