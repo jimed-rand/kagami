@@ -116,6 +116,33 @@ func IsAPTBased() bool {
 	return hasDebianRelease
 }
 
+// IsContainer checks if the program is running inside a container (Docker, Podman, Distrobox)
+func IsContainer() bool {
+	// Check for .dockerenv (Standard Docker)
+	if _, err := os.Stat("/.dockerenv"); err == nil {
+		return true
+	}
+
+	// Check for .containerenv (Podman/Distrobox)
+	if _, err := os.Stat("/run/.containerenv"); err == nil {
+		return true
+	}
+
+	// Check /proc/1/sched (If it contains 'init', it's likely a container or init system)
+	if content, err := os.ReadFile("/proc/1/sched"); err == nil {
+		if !strings.Contains(string(content), "init") && !strings.Contains(string(content), "systemd") {
+			// This is not foolproof but a good hint
+		}
+	}
+
+	// Distrobox specific environment variable
+	if os.Getenv("DISTROBOX_ENTER_PATH") != "" {
+		return true
+	}
+
+	return false
+}
+
 // CheckDependencies checks which required packages are installed
 func CheckDependencies() Dependencies {
 	deps := Dependencies{

@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"kagami/pkg/config"
+	"kagami/pkg/system"
 )
 
 // Builder handles the ISO building process
@@ -103,7 +104,7 @@ func (b *Builder) Build() error {
 func (b *Builder) checkPrerequisites() error {
 	required := []string{
 		"debootstrap",
-		"squashfs-tools",
+		"mksquashfs",
 		"xorriso",
 		"grub-mkstandalone",
 		"gpg",
@@ -119,6 +120,12 @@ func (b *Builder) checkPrerequisites() error {
 	// Check if running as root
 	if os.Geteuid() != 0 {
 		return fmt.Errorf("this program must be run as root (use sudo)")
+	}
+
+	// Environment-specific tips
+	if system.IsContainer() {
+		fmt.Println("[INFO] Container environment detected (Docker/Podman/Distrobox).")
+		fmt.Println("       Ensure the container has SYS_ADMIN privileges for mounting.")
 	}
 
 	return nil
@@ -178,7 +185,13 @@ func (b *Builder) bootstrapSystem() error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	return cmd.Run()
+	if err := cmd.Run(); err != nil {
+		if system.IsContainer() {
+			return fmt.Errorf("debootstrap failed: %v\n[TIP] In a container, debootstrap requires '--privileged' or 'CAP_MKNOD' to create device nodes.", err)
+		}
+		return err
+	}
+	return nil
 }
 
 // mountFilesystems mounts necessary filesystems for chroot
@@ -202,6 +215,11 @@ func (b *Builder) mountFilesystems() error {
 			continue
 		}
 
+		// Ensure target directory exists
+		if err := os.MkdirAll(target, 0755); err != nil {
+			return fmt.Errorf("failed to create mount target %s: %v", target, err)
+		}
+
 		var cmd *exec.Cmd
 		if m.flags == "bind" {
 			cmd = exec.Command("mount", "--bind", m.source, target)
@@ -210,7 +228,11 @@ func (b *Builder) mountFilesystems() error {
 		}
 
 		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("failed to mount %s: %v", target, err)
+			errMsg := fmt.Errorf("failed to mount %s: %v", target, err)
+			if system.IsContainer() {
+				return fmt.Errorf("%v\n[TIP] In a container, this usually requires '--privileged' or 'CAP_SYS_ADMIN'.", errMsg)
+			}
+			return errMsg
 		}
 	}
 

@@ -470,10 +470,20 @@ func isMounted(path string) bool {
 	}
 	defer file.Close()
 
+	// Ensure path is absolute and clean
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		absPath = path
+	}
+
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
-		if strings.Contains(scanner.Text(), path) {
-			return true
+		fields := strings.Fields(scanner.Text())
+		if len(fields) >= 2 {
+			// Check if the mount point (field 1) matches exactly
+			if fields[1] == absPath {
+				return true
+			}
 		}
 	}
 	return false
