@@ -159,12 +159,13 @@ func RunWizard() (*Config, string, error) {
 
 	// --- System Settings ------------------------------------------------
 	fmt.Println("[ System Settings ]")
-	defaultHostname := "ubuntu-kagami"
-	if isDebian {
-		defaultHostname = "debian-kagami"
-	}
+	defaultHostname := distChoice
 	if isMinimal {
-		defaultHostname += "-installer"
+		defaultHostname += "-minimal"
+	} else if !isDebian && desktop != "none" {
+		defaultHostname += "-" + desktop
+	} else {
+		defaultHostname += "-desktop"
 	}
 	hostname := promptString(reader, fmt.Sprintf("Hostname [%s]:", defaultHostname), defaultHostname)
 	fmt.Println()
@@ -270,9 +271,9 @@ func RunWizard() (*Config, string, error) {
 
 	// --- Save Configuration ---------------------------------------------
 	fmt.Println("[ Save Configuration ]")
-	defaultOutputName := fmt.Sprintf("kagami-%s-%s.json", release, desktop)
+	defaultOutputName := fmt.Sprintf("%s-%s-%s.json", distChoice, release, desktop)
 	if isMinimal {
-		defaultOutputName = fmt.Sprintf("kagami-%s-minimal-installer.json", release)
+		defaultOutputName = fmt.Sprintf("%s-%s-minimal.json", distChoice, release)
 	}
 
 	configDir, _ := system.GetAppPaths()

@@ -421,7 +421,7 @@ func moveISOToSafety(isoPath, workDir string) string {
 	absISO, _ := filepath.Abs(isoPath)
 	absWork, _ := filepath.Abs(workDir)
 
-	// If ISO is not in workspace, it's already safe
+	// If ISO is not in workspace, it's already 4
 	if !strings.HasPrefix(absISO, absWork) {
 		return isoPath
 	}

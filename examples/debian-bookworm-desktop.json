@@ -1,7 +1,7 @@
 {
   "release": "bookworm",
   "system": {
-    "hostname": "debian-kagami",
+    "hostname": "debian-bookworm",
     "block_snapd": true,
     "architecture": "amd64",
     "locale": "en_US.UTF-8",
