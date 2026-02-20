@@ -32,9 +32,10 @@ func RunWizard() (*Config, string, error) {
 	// --- Distribution ---------------------------------------------------
 	fmt.Println("[ Distribution ]")
 	distOptions := []WizardOption{
-		{"ubuntu", "Ubuntu", "Ubuntu-based ISO (LTS or Rolling)"},
-		{"debian", "Debian", "Debian-based ISO (Stable, Testing, or Sid)"},
+		{"ubuntu", "Ubuntu", "Ubuntu-based ISO"},
+		{"debian", "Debian", "Debian-based ISO (Stable, Testing, or Unstable)"},
 	}
+
 	distChoice := promptChoice(reader, "Select base distribution:", distOptions)
 	isDebian := distChoice == "debian"
 	fmt.Println()
@@ -90,7 +91,8 @@ func RunWizard() (*Config, string, error) {
 		wmChoice := promptChoice(reader, "Select window manager for live environment:", wmOptions)
 
 		desktop = "none"
-		additionalPkgs = getMinimalWMPackages(wmChoice, isDebian)
+		additionalPkgs = getMinimalWMPackages(wmChoice, distChoice)
+
 	} else {
 		fmt.Println("[ Desktop Environment ]")
 		var desktopOptions []WizardOption
@@ -192,9 +194,10 @@ func RunWizard() (*Config, string, error) {
 		kernelOptions = []WizardOption{
 			{"linux-generic", "Generic", "Standard Ubuntu kernel (recommended)"},
 			{"linux-lowlatency", "Low-latency", "Reduced latency kernel (audio/pro-style)"},
-			{"linux-oem-24.04", "OEM", "Latest stabilized OEM kernel (better hardware support)"},
+			{"linux-oem-24.04", "OEM", "OEM kernel (latest stabilized)"},
 		}
 	}
+
 	kernel := promptChoice(reader, "Select kernel:", kernelOptions)
 	fmt.Println()
 
@@ -249,9 +252,9 @@ func RunWizard() (*Config, string, error) {
 		blockSnapdStr := promptString(reader, "Block snapd? [Y/n]:", "Y")
 		blockSnapd = strings.ToLower(blockSnapdStr) != "n"
 	}
-	fwStr := promptString(reader, "Enable firewall (ufw)? [y/N]:", "y)
-	enableFirewall := strings.ToLower(fwStr) == "y"
+	fwStr := promptString(reader, "Enable firewall (ufw)? [y/N]:", "N")
 
+	enableFirewall := strings.ToLower(fwStr) == "y"
 
 	fmt.Println()
 
@@ -259,7 +262,6 @@ func RunWizard() (*Config, string, error) {
 	cfg := buildWizardConfig(wizardParams{
 		distro:         distChoice,
 		release:        release,
-		isDebian:       isDebian,
 		isMinimal:      isMinimal,
 		desktop:        desktop,
 		additionalPkgs: additionalPkgs,
@@ -325,10 +327,10 @@ func RunWizard() (*Config, string, error) {
 }
 
 type wizardParams struct {
-	distro         string
-	release        string
-	isDebian       bool
-	isMinimal      bool
+	distro    string
+	release   string
+	isMinimal bool
+
 	desktop        string
 	additionalPkgs []string
 	installerType  string
@@ -345,7 +347,7 @@ type wizardParams struct {
 
 func buildWizardConfig(p wizardParams) *Config {
 	// Essential packages differ between Ubuntu and Debian
-	essential := getEssentialPackages(p.isDebian)
+	essential := getEssentialPackages(p.distro)
 
 	// Default additional packages
 	defaultAdditional := []string{"vim", "curl", "wget", "git", "htop"}
@@ -354,7 +356,7 @@ func buildWizardConfig(p wizardParams) *Config {
 	// Remove list
 	var removeList []string
 	var disableServices []string
-	if !p.isDebian {
+	if p.distro == "ubuntu" {
 		removeList = []string{
 			"ubuntu-advantage-tools",
 			"ubuntu-report",
@@ -413,8 +415,9 @@ func buildWizardConfig(p wizardParams) *Config {
 }
 
 // getEssentialPackages returns the essential packages list for the distro
-func getEssentialPackages(isDebian bool) []string {
-	if isDebian {
+func getEssentialPackages(distro string) []string {
+	if distro == "debian" {
+
 		return []string{
 			"sudo",
 			"casper",
@@ -463,7 +466,8 @@ func getEssentialPackages(isDebian bool) []string {
 
 // getMinimalWMPackages returns the package list for a minimal ALCI-style live
 // environment: a WM + Xorg + display manager + terminal + Calamares autostart
-func getMinimalWMPackages(wm string, isDebian bool) []string {
+func getMinimalWMPackages(wm string, _ string) []string {
+
 	// Common base packages for any minimal WM installer ISO
 	base := []string{
 		"xorg",

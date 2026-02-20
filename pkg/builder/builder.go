@@ -25,6 +25,7 @@ type Builder struct {
 	ChrootDir   string
 	ImageDir    string
 	DebianAlias string // stable, testing, or unstable
+	PrettyName  string // e.g. "Debian GNU/Linux 12"
 }
 
 // NewBuilder creates a new Builder instance
@@ -45,6 +46,10 @@ func (b *Builder) isDebian() bool {
 
 // getDistName returns the descriptive name of the distribution
 func (b *Builder) getDistName() string {
+	if b.PrettyName != "" {
+		return b.PrettyName
+	}
+
 	if b.isDebian() {
 		if b.DebianAlias != "" {
 			return "Debian " + strings.Title(b.DebianAlias)
@@ -1141,15 +1146,33 @@ func (b *Builder) resolveDebianRelease() {
 	}
 
 	lines := strings.Split(string(output), "\n")
+	var label, version, codename string
 	for _, line := range lines {
 		if strings.HasPrefix(line, "Codename:") {
 			parts := strings.Fields(line)
 			if len(parts) >= 2 {
-				codename := parts[1]
-				fmt.Printf("[INFO] Debian %s resolved to codename: %s\n", alias, codename)
-				b.Config.Release = codename
-				return
+				codename = parts[1]
 			}
+		} else if strings.HasPrefix(line, "Label:") {
+			parts := strings.SplitN(line, ":", 2)
+			if len(parts) == 2 {
+				label = strings.TrimSpace(parts[1])
+			}
+		} else if strings.HasPrefix(line, "Version:") {
+			parts := strings.SplitN(line, ":", 2)
+			if len(parts) == 2 {
+				version = strings.TrimSpace(parts[1])
+			}
+		}
+	}
+
+	if codename != "" {
+		fmt.Printf("[INFO] Debian %s resolved to codename: %s\n", alias, codename)
+		b.Config.Release = codename
+		if label != "" && version != "" {
+			b.PrettyName = fmt.Sprintf("%s %s", label, version)
+		} else if label != "" {
+			b.PrettyName = fmt.Sprintf("%s %s", label, strings.Title(alias))
 		}
 	}
 }
