@@ -81,9 +81,10 @@ func (b *Builder) Build() error {
 		{"Bootstrapping base system", b.bootstrapSystem},
 		{"Mounting filesystems", b.mountFilesystems},
 		{"Configuring system", b.configureSystem},
-		{"Installing packages", b.installPackages},
 		{"Blocking snapd permanently", b.blockSnapd},
+		{"Installing packages", b.installPackages},
 		{"Installing desktop environment", b.installDesktop},
+
 		{"Configuring Flatpak", b.setupFlatpak},
 		{"Configuring bootloader", b.configureBootloader},
 		{"Cleaning up chroot", b.cleanupChroot},
@@ -352,20 +353,43 @@ func (b *Builder) installPackages() error {
 
 // blockSnapd implements comprehensive snapd blocking
 func (b *Builder) blockSnapd() error {
+	if !b.Config.Security.BlockSnapdForever && !b.Config.System.BlockSnapd {
+		return nil
+	}
+
 	fmt.Println("[ACTION] Implementing comprehensive snapd blocking...")
 
 	scripts := []string{
-		// Remove snapd if present
-		"apt-get purge -y snapd || true",
+		// Remove snapd packages if present
+		"apt-get purge -y snapd snap-confine ubuntu-core-launcher snapd-xdg-open || true",
 		"apt-get autoremove -y || true",
+		"rm -rf /var/cache/snapd /var/lib/snapd /var/snap /snap",
 
-		// Create APT preference to block snapd
-		`cat > /etc/apt/preferences.d/no-snapd <<'EOF'
+		// Create APT preference to block snapd (refined for Ubuntu/Debian)
+		`cat > /etc/apt/preferences.d/nosnapd.pref <<'EOF'
+# Snapd is permanently blocked on this system
+Explanation: Snapd is permanently blocked on this system to prevent unwanted installation.
 Package: snapd
 Pin: release *
 Pin-Priority: -1
 
-Package: snapd-*
+Package: snapd:*
+Pin: release *
+Pin-Priority: -1
+
+Package: snapd-unwrapped
+Pin: release *
+Pin-Priority: -1
+
+Package: snap-confine
+Pin: release *
+Pin-Priority: -1
+
+Package: ubuntu-core-launcher
+Pin: release *
+Pin-Priority: -1
+
+Package: snapd-xdg-open
 Pin: release *
 Pin-Priority: -1
 EOF`,
@@ -396,7 +420,7 @@ ConditionPathExists=!/etc/snapd-blocked
 ListenStream=
 EOF`,
 
-		// Create hook to prevent snapd installation
+		// Create hook to prevent snapd installation via apt
 		"mkdir -p /etc/apt/apt.conf.d",
 		`cat > /etc/apt/apt.conf.d/99-block-snapd <<'EOF'
 // Block snapd package installation
@@ -412,8 +436,10 @@ EOF`,
 
 while read pkg; do
     if [[ "$pkg" == *"snapd"* ]]; then
-        echo "ERROR: Installation of snapd is blocked on this system!" >&2
-        echo "This system is configured to never use snapd." >&2
+        echo "==========================================================" >&2
+        echo "ERROR: Installation of snapd is BLOCKED on this system!" >&2
+        echo "This distribution is configured to never use snapd." >&2
+        echo "==========================================================" >&2
         exit 1
     fi
 done
