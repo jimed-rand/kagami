@@ -217,14 +217,16 @@ func (b *Builder) createISO() error {
 	}
 
 	// Use mtools to copy files to FAT image
-	mmdCmd := exec.Command("mmd", "-i", efibootImg, "efi", "efi/ubuntu", "efi/boot")
+	mmdCmd := exec.Command("mmd", "-i", efibootImg, "efi", "efi/ubuntu", "efi/debian", "efi/boot")
 	mmdCmd.Run()
 
 	mcopyCommands := [][]string{
 		{"mcopy", "-i", efibootImg, filepath.Join(isolinuxDir, "bootx64.efi"), "::efi/boot/bootx64.efi"},
 		{"mcopy", "-i", efibootImg, filepath.Join(isolinuxDir, "mmx64.efi"), "::efi/boot/mmx64.efi"},
 		{"mcopy", "-i", efibootImg, filepath.Join(isolinuxDir, "grubx64.efi"), "::efi/boot/grubx64.efi"},
+		{"mcopy", "-i", efibootImg, grubCfg, "::efi/boot/grub.cfg"},
 		{"mcopy", "-i", efibootImg, grubCfg, "::efi/ubuntu/grub.cfg"},
+		{"mcopy", "-i", efibootImg, grubCfg, "::efi/debian/grub.cfg"},
 	}
 
 	for _, cmd := range mcopyCommands {
@@ -359,7 +361,10 @@ func (b *Builder) createISO() error {
 
 	// Add mandatory files
 	xorrisoArgs = append(xorrisoArgs,
+		"/boot/grub/grub.cfg="+grubCfg,
+		"/EFI/boot/grub.cfg="+grubCfg,
 		"/EFI/ubuntu/grub.cfg="+grubCfg,
+		"/EFI/debian/grub.cfg="+grubCfg,
 		"/isolinux/bios.img="+biosImg,
 		"/isolinux/efiboot.img="+efibootImg,
 		b.ImageDir,
@@ -441,7 +446,16 @@ func (b *Builder) generateSourcesList() string {
 
 	var sourcesContent string
 	if b.isDebian() {
-		sourcesContent = fmt.Sprintf(`cat > /etc/apt/sources.list <<'EOF'
+		if b.DebianAlias == "unstable" || b.Config.Release == "sid" {
+			// Sid/Unstable: Single repository, no security or updates
+			sourcesContent = fmt.Sprintf(`cat > /etc/apt/sources.list <<'EOF'
+deb %s %s main contrib non-free non-free-firmware
+deb-src %s %s main contrib non-free non-free-firmware
+`, mirror, b.Config.Release, mirror, b.Config.Release)
+		} else {
+
+			// Stable/Testing
+			sourcesContent = fmt.Sprintf(`cat > /etc/apt/sources.list <<'EOF'
 deb %s %s main contrib non-free non-free-firmware
 deb-src %s %s main contrib non-free non-free-firmware
 
@@ -451,14 +465,16 @@ deb-src %s %s-updates main contrib non-free non-free-firmware
 deb http://security.debian.org/debian-security %s-security main contrib non-free non-free-firmware
 deb-src http://security.debian.org/debian-security %s-security main contrib non-free non-free-firmware
 `,
-			mirror, b.Config.Release,
-			mirror, b.Config.Release,
-			mirror, b.Config.Release,
-			mirror, b.Config.Release,
-			b.Config.Release,
-			b.Config.Release,
-		)
+				mirror, b.Config.Release,
+				mirror, b.Config.Release,
+				mirror, b.Config.Release,
+				mirror, b.Config.Release,
+				b.Config.Release,
+				b.Config.Release,
+			)
+		}
 	} else {
+		// Ubuntu
 		sourcesContent = fmt.Sprintf(`cat > /etc/apt/sources.list <<'EOF'
 deb %s %s main restricted universe multiverse
 deb-src %s %s main restricted universe multiverse
@@ -479,7 +495,7 @@ deb-src %s %s-updates main restricted universe multiverse
 	}
 
 	// Add proposed if requested
-	if b.Config.Repository.UseProposed {
+	if b.Config.Repository.UseProposed && b.Config.Release != "sid" && b.Config.Release != "unstable" {
 		sourcesContent += fmt.Sprintf(`
 deb %s %s-proposed main restricted universe multiverse
 deb-src %s %s-proposed main restricted universe multiverse

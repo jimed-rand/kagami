@@ -20,7 +20,7 @@ import (
 func main() {
 	var (
 		configFile  = flag.String("config", "", "Path to configuration file (JSON)")
-		release     = flag.String("release", "noble", "Ubuntu release (lts, devel, focal, jammy, noble, resolute)")
+		release     = flag.String("release", "noble", "OS release (e.g. noble, jammy, bookworm, trixie, sid)")
 		workDir     = flag.String("workdir", "", "Working directory for build")
 		outputISO   = flag.String("output", "", "Output ISO file path")
 		hostname    = flag.String("hostname", "ubuntu-custom", "Custom hostname")
@@ -29,7 +29,7 @@ func main() {
 		showVersion = flag.Bool("version", false, "Show version information")
 		checkDeps   = flag.Bool("check-deps", false, "Check system dependencies")
 		installDeps = flag.Bool("install-deps", false, "Install missing dependencies (requires sudo)")
-		mirrorURL   = flag.String("mirror", "", "Custom Ubuntu mirror URL (e.g. http://archive.ubuntu.com/ubuntu/)")
+		mirrorURL   = flag.String("mirror", "", "Custom repository mirror URL")
 		wizardMode  = flag.Bool("wizard", false, "Launch interactive configuration wizard")
 	)
 
@@ -57,7 +57,7 @@ func main() {
 			fmt.Println("----------------------------------------------------------------")
 			fmt.Println("  [WARNING] NON-APT SYSTEM DETECTED")
 			fmt.Println()
-			fmt.Println("  Kagami is designed for Ubuntu/Debian (APT-based) only.")
+			fmt.Println("  Kagami is designed for Debian/Ubuntu (APT-based) only.")
 			fmt.Println("  Build, dependency, and installation features are disabled.")
 			fmt.Println()
 			fmt.Println("  On this system, only generating JSON configuration files")
@@ -65,7 +65,7 @@ func main() {
 			fmt.Println("----------------------------------------------------------------")
 			fmt.Println()
 			fmt.Println("[TIP] If you are on a non-APT distribution (Fedora, Arch, etc.), use Distrobox")
-			fmt.Println("      (Docker/Podman) to create an Ubuntu/Debian container. Ensure you map/use")
+			fmt.Println("      (Docker/Podman) to create a Debian/Ubuntu container. Ensure you map/use")
 			fmt.Printf("      your home folder so %s can access the build workspace correctly.\n", config.AppName)
 			fmt.Println()
 			fmt.Println("      Example:")
@@ -305,7 +305,7 @@ func main() {
 
 func printBuildInfo(cfg *config.Config, workDir, isoPath string) {
 	fmt.Println("---------------------------------------------------------------")
-	fmt.Printf("               %s - Ubuntu ISO Builder %s               \n", config.AppName, config.Version)
+	fmt.Printf("               %s - Debian/Ubuntu ISO Builder %s               \n", config.AppName, config.Version)
 	fmt.Println("---------------------------------------------------------------")
 	fmt.Printf("\n[INFO] Build Configuration:\n")
 	fmt.Printf("  Release:      %s\n", cfg.Release)
@@ -330,7 +330,7 @@ func printBuildSuccess(isoPath string) {
 }
 
 func printBanner() {
-	fmt.Printf("%s - Ubuntu ISO Builder %s\n", config.AppName, config.Version)
+	fmt.Printf("%s - Debian/Ubuntu ISO Builder %s\n", config.AppName, config.Version)
 	fmt.Println("Vanilla Desktop Environments")
 	fmt.Println()
 }

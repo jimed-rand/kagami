@@ -19,11 +19,12 @@ import (
 
 // Builder handles the ISO building process
 type Builder struct {
-	Config    *config.Config
-	WorkDir   string
-	OutputISO string
-	ChrootDir string
-	ImageDir  string
+	Config      *config.Config
+	WorkDir     string
+	OutputISO   string
+	ChrootDir   string
+	ImageDir    string
+	DebianAlias string // stable, testing, or unstable
 }
 
 // NewBuilder creates a new Builder instance
@@ -39,37 +40,33 @@ func NewBuilder(cfg *config.Config, workDir, outputISO string) *Builder {
 
 // isDebian returns true if the release is a Debian release
 func (b *Builder) isDebian() bool {
-	debianReleases := map[string]bool{
-		"bookworm": true,
-		"trixie":   true,
-		"sid":      true,
-	}
-	return debianReleases[b.Config.Release]
+	return b.Config.Distro == "debian"
 }
 
 // getDistName returns the descriptive name of the distribution
 func (b *Builder) getDistName() string {
+	if b.isDebian() {
+		if b.DebianAlias != "" {
+			return "Debian " + strings.Title(b.DebianAlias)
+		}
+		return "Debian (" + b.Config.Release + ")"
+	}
+
 	switch b.Config.Release {
 	case "focal", "jammy", "noble", "resolute":
 		return "Ubuntu LTS"
 	case "devel":
 		return "Ubuntu Rolling"
-	case "bookworm":
-		return "Debian Stable"
-	case "trixie":
-		return "Debian Testing"
-	case "sid":
-		return "Debian Sid"
 	default:
-		if b.isDebian() {
-			return "Debian Custom"
-		}
 		return "Ubuntu Custom"
 	}
 }
 
 // Build executes the complete build process
 func (b *Builder) Build() error {
+	// Resolve Debian aliases to codenames if needed
+	b.resolveDebianRelease()
+
 	steps := []struct {
 		name string
 		fn   func() error
@@ -151,7 +148,7 @@ func (b *Builder) createDirectories() error {
 	return nil
 }
 
-// bootstrapSystem creates the base Ubuntu system using debootstrap
+// bootstrapSystem creates the base OS system using debootstrap
 func (b *Builder) bootstrapSystem() error {
 	// Check if chroot already exists
 	if _, err := os.Stat(filepath.Join(b.ChrootDir, "etc")); err == nil {
@@ -264,7 +261,7 @@ func (b *Builder) configureSystem() error {
 		}
 	}
 
-	// Add additional repositories with keys (Standard Ubuntu)
+	// Add additional repositories with keys (Ubuntu specific)
 	if err := b.configureAdditionalRepos(); err != nil {
 		log.Printf("Warning: Failed to configure additional repos: %v", err)
 	}
@@ -500,34 +497,10 @@ func (b *Builder) installDesktop() error {
 			}
 		}
 
-		// Install calamares if requested
+		// Setup Calamares if requested
 		if b.Config.Installer.Type == "calamares" {
-			installerPkgs := []string{
-				"calamares",
-				"calamares-settings-debian", // Default for Debian-based
-			}
-
-			// Adjust for Ubuntu-based if not Debian
-			if !b.isDebian() {
-				installerPkgs = []string{
-					"calamares",
-					"calamares-settings-ubuntu",
-				}
-			}
-
-			installerList := strings.Join(installerPkgs, " ")
-			if err := b.chrootExec(fmt.Sprintf("DEBIAN_FRONTEND=noninteractive apt-get install -y %s", installerList)); err != nil {
-				log.Printf("Warning: Calamares failed to install: %v", err)
-			}
-
-			// Apply custom Calamares configuration if provided
-			if err := b.applyCalamaresConfig(); err != nil {
-				log.Printf("Warning: Failed to apply Calamares configuration: %v", err)
-			}
-
-			// Configure minimal installer autostart (ALCI-style)
-			if err := b.configureMinimalInstaller(); err != nil {
-				log.Printf("Warning: Failed to configure minimal installer: %v", err)
+			if err := b.setupCalamares(); err != nil {
+				log.Printf("Warning: Failed to setup Calamares: %v", err)
 			}
 		}
 
@@ -640,26 +613,8 @@ func (b *Builder) installDesktop() error {
 
 	// Install calamares if requested (for non-'none' desktop)
 	if b.Config.Installer.Type == "calamares" {
-		installerPkgs := []string{
-			"calamares",
-			"calamares-settings-debian",
-		}
-
-		if !b.isDebian() {
-			installerPkgs = []string{
-				"calamares",
-				"calamares-settings-ubuntu",
-			}
-		}
-
-		installerList := strings.Join(installerPkgs, " ")
-		if err := b.chrootExec(fmt.Sprintf("DEBIAN_FRONTEND=noninteractive apt-get install -y %s", installerList)); err != nil {
-			log.Printf("Warning: Calamares failed to install: %v", err)
-		}
-
-		// Apply custom Calamares configuration
-		if err := b.applyCalamaresConfig(); err != nil {
-			log.Printf("Warning: Failed to apply Calamares configuration: %v", err)
+		if err := b.setupCalamares(); err != nil {
+			log.Printf("Warning: Failed to setup Calamares: %v", err)
 		}
 	}
 
@@ -785,8 +740,8 @@ func (b *Builder) configureBootloader() error {
 		Output()
 	exec.Command("rm", "-f", memtestZip).Run()
 
-	// Create ubuntu marker file
-	markerFile := filepath.Join(b.ImageDir, "ubuntu")
+	// Create distribution marker file
+	markerFile := filepath.Join(b.ImageDir, "kagami-live")
 	os.WriteFile(markerFile, []byte(""), 0644)
 
 	// Create GRUB configuration
@@ -820,9 +775,13 @@ menuentry "Install %s" {
 	}
 
 	return fmt.Sprintf(`
-search --set=root --file /ubuntu
+search --set=root --file /kagami-live
 
 insmod all_video
+insmod part_gpt
+insmod part_msdos
+insmod fat
+insmod iso9660
 
 set default="0"
 set timeout=30
@@ -838,7 +797,6 @@ menuentry "Check disc for defects" {
    initrd /casper/initrd
 }
 
-grub_platform
 if [ "$grub_platform" = "efi" ]; then
 menuentry 'UEFI Firmware Settings' {
    fwsetup
@@ -852,6 +810,7 @@ menuentry "Test memory Memtest86+ (BIOS)" {
    linux16 /install/memtest86+.bin
 }
 fi
+
 `, distName, installEntry)
 }
 
@@ -1031,4 +990,166 @@ EOF`,
 
 	fmt.Println("[SUCCESS] Minimal installer environment configured (ALCI-style)")
 	return nil
+}
+
+// setupCalamares performs comprehensive Calamares configuration
+func (b *Builder) setupCalamares() error {
+	fmt.Println("[ACTION] Setting up Calamares installer...")
+
+	installerPkgs := []string{"calamares"}
+	if b.isDebian() {
+		installerPkgs = append(installerPkgs, "calamares-settings-debian")
+	} else {
+		// For Ubuntu, we use the package as base but will override with git repo if possible
+		installerPkgs = append(installerPkgs, "calamares-settings-ubuntu")
+	}
+
+	installerList := strings.Join(installerPkgs, " ")
+	if err := b.chrootExec(fmt.Sprintf("DEBIAN_FRONTEND=noninteractive apt-get install -y %s", installerList)); err != nil {
+		log.Printf("Warning: Calamares failed to install: %v", err)
+	}
+
+	// For Ubuntu, apply settings from the Lubuntu git repository if cloned
+	if !b.isDebian() {
+		if err := b.applyUbuntuCalamaresSettings(); err != nil {
+			log.Printf("Warning: Could not apply Lubuntu git settings: %v", err)
+		}
+	}
+
+	// Apply custom branding information
+	if err := b.applyBranding(); err != nil {
+		log.Printf("Warning: Failed to apply branding to Calamares: %v", err)
+	}
+
+	// Apply custom Calamares configuration directory (overwrites everything else)
+	if err := b.applyCalamaresConfig(); err != nil {
+		log.Printf("Warning: Failed to apply custom Calamares configuration: %v", err)
+	}
+
+	// Configure minimal installer autostart (ALCI-style)
+	return b.configureMinimalInstaller()
+}
+
+// applyUbuntuCalamaresSettings uses the Lubuntu settings repository
+func (b *Builder) applyUbuntuCalamaresSettings() error {
+	cwd, _ := os.Getwd()
+	repoPath := filepath.Join(cwd, "Git/calamares-settings-ubuntu/lubuntu")
+
+	if _, err := os.Stat(repoPath); err != nil {
+		return fmt.Errorf("ubuntu calamares settings repo not found at %s. Please clone it first", repoPath)
+	}
+
+	fmt.Println("[ACTION] Incorporating settings from Lubuntu Calamares repository...")
+
+	destPath := filepath.Join(b.ChrootDir, "etc", "calamares")
+	os.MkdirAll(destPath, 0755)
+
+	// Copy modules, branding and settings
+	// We use shell to handle the copy recursively
+	cmds := []string{
+		fmt.Sprintf("cp -rv %s/branding/* %s/branding/", repoPath, destPath),
+		fmt.Sprintf("cp -v %s/settings.conf %s/", repoPath, destPath),
+		fmt.Sprintf("cp -rv %s/modules/* %s/modules/", repoPath, destPath),
+	}
+
+	for _, cmdStr := range cmds {
+		cmd := exec.Command("bash", "-c", cmdStr)
+		cmd.Run()
+	}
+
+	return nil
+}
+
+// applyBranding modifies branding.desc in the chroot
+func (b *Builder) applyBranding() error {
+	branding := b.Config.Installer.Branding
+	if branding.ProductName == "" {
+		return nil
+	}
+
+	fmt.Println("[ACTION] Applying custom branding to Calamares settings...")
+
+	// Possible paths for branding.desc
+	paths := []string{
+		filepath.Join(b.ChrootDir, "etc", "calamares/branding/lubuntu/branding.desc"),
+		filepath.Join(b.ChrootDir, "etc", "calamares/branding/debian/branding.desc"),
+		filepath.Join(b.ChrootDir, "etc", "calamares/branding/default/branding.desc"),
+	}
+
+	var brandingFile string
+	for _, p := range paths {
+		if _, err := os.Stat(p); err == nil {
+			brandingFile = p
+			break
+		}
+	}
+
+	if brandingFile == "" {
+		return fmt.Errorf("could not find branding.desc to modify")
+	}
+
+	content, err := os.ReadFile(brandingFile)
+	if err != nil {
+		return err
+	}
+
+	lines := strings.Split(string(content), "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "productName:") {
+			lines[i] = "    productName:         " + branding.ProductName
+		} else if strings.HasPrefix(trimmed, "shortProductName:") {
+			lines[i] = "    shortProductName:    " + branding.ShortProductName
+		} else if strings.HasPrefix(trimmed, "productUrl:") {
+			lines[i] = "    productUrl:          " + branding.ProductUrl
+		} else if strings.HasPrefix(trimmed, "supportUrl:") {
+			lines[i] = "    supportUrl:          " + branding.SupportUrl
+		} else if strings.HasPrefix(trimmed, "version=") {
+			lines[i] = "version=" + branding.Version
+		}
+	}
+
+	return os.WriteFile(brandingFile, []byte(strings.Join(lines, "\n")), 0644)
+}
+
+// resolveDebianRelease fetches the real codename for stable, testing, or unstable
+func (b *Builder) resolveDebianRelease() {
+	if !b.isDebian() {
+		return
+	}
+
+	alias := strings.ToLower(b.Config.Release)
+	if alias != "stable" && alias != "testing" && alias != "unstable" {
+		return
+	}
+
+	b.DebianAlias = alias
+	fmt.Printf("[ACTION] Resolving Debian %s codename...\n", alias)
+
+	mirror := b.Config.Repository.Mirror
+	if mirror == "" {
+		mirror = "http://deb.debian.org/debian/"
+	}
+
+	// Fetch Release file from mirror
+	url := fmt.Sprintf("%sdists/%s/Release", mirror, alias)
+	cmd := exec.Command("wget", "-qO-", url)
+	output, err := cmd.Output()
+	if err != nil {
+		log.Printf("Warning: Could not resolve Debian codename via net (offline?), using alias %s", alias)
+		return
+	}
+
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		if strings.HasPrefix(line, "Codename:") {
+			parts := strings.Fields(line)
+			if len(parts) >= 2 {
+				codename := parts[1]
+				fmt.Printf("[INFO] Debian %s resolved to codename: %s\n", alias, codename)
+				b.Config.Release = codename
+				return
+			}
+		}
+	}
 }

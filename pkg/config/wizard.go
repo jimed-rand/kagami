@@ -44,10 +44,11 @@ func RunWizard() (*Config, string, error) {
 	var releaseOptions []WizardOption
 	if isDebian {
 		releaseOptions = []WizardOption{
-			{"trixie", "Trixie", "Debian 13 (Stable)"},
-			{"testing", "Testing", "Debian Testing"},
-			{"sid", "Unstable", "Debian Unstable (Rolling)"},
+			{"stable", "Stable", "Debian Stable (latest)"},
+			{"testing", "Testing", "Debian Testing (latest)"},
+			{"unstable", "Unstable", "Debian Unstable/Sid"},
 		}
+
 	} else {
 		releaseOptions = []WizardOption{
 			{"noble", "Noble Numbat", "Ubuntu 24.04 LTS"},
@@ -221,14 +222,17 @@ func RunWizard() (*Config, string, error) {
 	mirror := promptString(reader, fmt.Sprintf("APT mirror [%s]:", defaultMirror), defaultMirror)
 	fmt.Println()
 
-	// --- Calamares Configuration ----------------------------------------
-	var calamaresConfigPath string
+	// --- Calamares Branding ---------------------------------------------
+	var branding BrandingConfig
 	if installerType == "calamares" {
-		fmt.Println("[ Calamares Configuration ]")
-		fmt.Println("  Optionally provide a path to a custom Calamares config")
-		fmt.Println("  directory. Leave empty to use defaults.")
+		fmt.Println("[ Calamares Branding ]")
+		fmt.Println("  Customize the installer's name and information.")
 		fmt.Println("----------------------------------------------------------------")
-		calamaresConfigPath = promptString(reader, "Calamares config path (optional):", "")
+		branding.ProductName = promptString(reader, "Product Name [Kagami OS]:", "Kagami OS")
+		branding.ShortProductName = promptString(reader, "Short Product Name [Kagami]:", "Kagami")
+		branding.ProductUrl = promptString(reader, "Product URL [https://github.com/jimed-rand/kagami]:", "https://github.com/jimed-rand/kagami")
+		branding.SupportUrl = promptString(reader, "Support URL [https://github.com/jimed-rand/kagami/issues]:", "https://github.com/jimed-rand/kagami/issues")
+		branding.Version = promptString(reader, fmt.Sprintf("Version [%s]:", release), release)
 	}
 	fmt.Println()
 
@@ -245,28 +249,30 @@ func RunWizard() (*Config, string, error) {
 		blockSnapdStr := promptString(reader, "Block snapd? [Y/n]:", "Y")
 		blockSnapd = strings.ToLower(blockSnapdStr) != "n"
 	}
-	enableFirewall := false
-	fwStr := promptString(reader, "Enable firewall (ufw)? [y/N]:", "N")
-	enableFirewall = strings.ToLower(fwStr) == "y"
+	fwStr := promptString(reader, "Enable firewall (ufw)? [y/N]:", "y)
+	enableFirewall := strings.ToLower(fwStr) == "y"
+
+
 	fmt.Println()
 
 	// --- Generate Configuration -----------------------------------------
 	cfg := buildWizardConfig(wizardParams{
-		release:         release,
-		isDebian:        isDebian,
-		isMinimal:       isMinimal,
-		desktop:         desktop,
-		additionalPkgs:  additionalPkgs,
-		installerType:   installerType,
-		slideshow:       slideshow,
-		hostname:        hostname,
-		arch:            arch,
-		kernel:          kernel,
-		mirror:          mirror,
-		calamaresConfig: calamaresConfigPath,
-		blockSnapd:      blockSnapd,
-		enableFirewall:  enableFirewall,
-		enableFlatpak:   enableFlatpak,
+		distro:         distChoice,
+		release:        release,
+		isDebian:       isDebian,
+		isMinimal:      isMinimal,
+		desktop:        desktop,
+		additionalPkgs: additionalPkgs,
+		installerType:  installerType,
+		slideshow:      slideshow,
+		hostname:       hostname,
+		arch:           arch,
+		kernel:         kernel,
+		mirror:         mirror,
+		branding:       branding,
+		blockSnapd:     blockSnapd,
+		enableFirewall: enableFirewall,
+		enableFlatpak:  enableFlatpak,
 	})
 
 	// --- Save Configuration ---------------------------------------------
@@ -319,21 +325,22 @@ func RunWizard() (*Config, string, error) {
 }
 
 type wizardParams struct {
-	release         string
-	isDebian        bool
-	isMinimal       bool
-	desktop         string
-	additionalPkgs  []string
-	installerType   string
-	slideshow       string
-	hostname        string
-	arch            string
-	mirror          string
-	calamaresConfig string
-	blockSnapd      bool
-	enableFirewall  bool
-	enableFlatpak   bool
-	kernel          string
+	distro         string
+	release        string
+	isDebian       bool
+	isMinimal      bool
+	desktop        string
+	additionalPkgs []string
+	installerType  string
+	slideshow      string
+	hostname       string
+	arch           string
+	mirror         string
+	branding       BrandingConfig
+	blockSnapd     bool
+	enableFirewall bool
+	enableFlatpak  bool
+	kernel         string
 }
 
 func buildWizardConfig(p wizardParams) *Config {
@@ -363,8 +370,10 @@ func buildWizardConfig(p wizardParams) *Config {
 	}
 
 	cfg := &Config{
+		Distro:  p.distro,
 		Release: p.release,
 		System: SystemConfig{
+
 			Hostname:     p.hostname,
 			BlockSnapd:   p.blockSnapd,
 			Architecture: p.arch,
@@ -385,10 +394,11 @@ func buildWizardConfig(p wizardParams) *Config {
 			EnableFlatpak: p.enableFlatpak,
 		},
 		Installer: InstallerConfig{
-			Type:            p.installerType,
-			Slideshow:       p.slideshow,
-			CalamaresConfig: p.calamaresConfig,
+			Type:      p.installerType,
+			Slideshow: p.slideshow,
+			Branding:  p.branding,
 		},
+
 		Network: NetworkConfig{
 			Manager: "network-manager",
 		},

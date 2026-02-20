@@ -73,47 +73,34 @@ func IsAPTBased() bool {
 		return false
 	}
 
-	// Check for rpm (If present alongside apt, it's likely an APT-RPM system like ALT Linux)
-	if _, err := exec.LookPath("rpm"); err == nil {
-		// Verify if it's explicitly ALT Linux
-		if content, err := os.ReadFile("/etc/os-release"); err == nil {
-			contentStr := strings.ToLower(string(content))
-			if strings.Contains(contentStr, "altlinux") || strings.Contains(contentStr, "alt linux") {
-				return false
-			}
-		}
-	}
-
-	// Check for sources.list
-	if _, err := os.Stat("/etc/apt/sources.list"); err != nil {
+	// Check for apt directory (more robust than sources.list file)
+	if _, err := os.Stat("/etc/apt"); err != nil {
 		return false
 	}
 
-	// Check for Debian/Ubuntu release files
-	hasDebianRelease := false
+	// Double check family to avoid APT-RPM (like ALT Linux)
 	releaseFiles := []string{
+		"/etc/os-release",
 		"/etc/debian_version",
 		"/etc/lsb-release",
-		"/etc/os-release",
 	}
 
 	for _, file := range releaseFiles {
-		if _, err := os.Stat(file); err == nil {
-			// Read and check if it's Debian/Ubuntu based
-			content, err := os.ReadFile(file)
-			if err == nil {
-				contentStr := strings.ToLower(string(content))
-				// Ensure it's strictly Debian or Ubuntu family and NOT an RPM-based variant
-				if (strings.Contains(contentStr, "ubuntu") || strings.Contains(contentStr, "debian")) &&
-					!strings.Contains(contentStr, "altlinux") {
-					hasDebianRelease = true
-					break
-				}
+		if content, err := os.ReadFile(file); err == nil {
+			contentStr := strings.ToLower(string(content))
+			if (strings.Contains(contentStr, "ubuntu") || strings.Contains(contentStr, "debian")) &&
+				!strings.Contains(contentStr, "altlinux") {
+				return true
 			}
 		}
 	}
 
-	return hasDebianRelease
+	// Fallback check: if /etc/debian_version exists, it's Debian-family
+	if _, err := os.Stat("/etc/debian_version"); err == nil {
+		return true
+	}
+
+	return false
 }
 
 // IsContainer checks if the program is running inside a container (Docker, Podman, Distrobox)

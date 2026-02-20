@@ -13,7 +13,8 @@ import (
 
 // Config represents the build configuration
 type Config struct {
-	Release    string           `json:"release"`
+	Distro     string           `json:"distro"`  // ubuntu or debian
+	Release    string           `json:"release"` // noble, stable, testing, etc.
 	System     SystemConfig     `json:"system"`
 	Repository RepositoryConfig `json:"repository"`
 	Packages   PackageConfig    `json:"packages"`
@@ -52,7 +53,17 @@ type InstallerConfig struct {
 	Type            string            `json:"type"`             // ubiquity, subiquity, or calamares
 	Slideshow       string            `json:"slideshow"`        // ubuntu, kubuntu, xubuntu, lubuntu, ubuntu-mate
 	CalamaresConfig string            `json:"calamares_config"` // Path to custom Calamares configuration directory
+	Branding        BrandingConfig    `json:"branding"`         // Custom branding information for Calamares
 	Settings        map[string]string `json:"settings"`         // Additional installer settings
+}
+
+// BrandingConfig defines branding information for the installer
+type BrandingConfig struct {
+	ProductName      string `json:"product_name"`
+	ShortProductName string `json:"short_product_name"`
+	ProductUrl       string `json:"product_url"`
+	SupportUrl       string `json:"support_url"`
+	Version          string `json:"version"`
 }
 
 // PackageConfig defines package installation preferences
@@ -151,21 +162,22 @@ func NewDefaultConfig(release string) *Config {
 
 // Validate checks if the configuration is valid
 func (c *Config) Validate() error {
-	validReleases := map[string]bool{
-		// Ubuntu
-		"focal":    true, // 20.04 LTS
-		"jammy":    true, // 22.04 LTS
-		"noble":    true, // 24.04 LTS
-		"resolute": true, // 26.04 LTS (Upcoming)
-		"devel":    true, // Rolling/Development
-		// Debian
-		"bookworm": true, // Stable
-		"trixie":   true, // Testing
-		"sid":      true, // Unstable
+	if c.Distro == "" {
+		return errors.New("distro must be specified (ubuntu or debian)")
 	}
 
-	if !validReleases[c.Release] {
-		return errors.New("invalid release. Must be one of: focal, jammy, noble, resolute, devel (Ubuntu) or bookworm, trixie, sid (Debian)")
+	if c.Distro == "debian" {
+		validDebian := map[string]bool{"stable": true, "testing": true, "unstable": true, "sid": true}
+		if !validDebian[c.Release] {
+			// If not an alias, we'll allow it but it might be a specific codename
+		}
+	} else {
+		validUbuntu := map[string]bool{
+			"focal": true, "jammy": true, "noble": true, "resolute": true, "devel": true,
+		}
+		if !validUbuntu[c.Release] {
+			return errors.New("invalid Ubuntu release. Must be one of: focal, jammy, noble, resolute, devel")
+		}
 	}
 
 	if c.System.Architecture != "amd64" && c.System.Architecture != "i386" && c.System.Architecture != "arm64" {
