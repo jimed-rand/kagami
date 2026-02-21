@@ -15,6 +15,7 @@ import (
 	"kagami/pkg/builder"
 	"kagami/pkg/config"
 	"kagami/pkg/system"
+	"kagami/tui"
 )
 
 func main() {
@@ -124,21 +125,11 @@ func main() {
 	}
 
 	if *wizardMode {
-		cfg, outputPath, err := config.RunWizard()
+		cfg, outputPath, err := tui.Run()
 		if err != nil {
-			fatal("Wizard execution failed: %v", err)
+			fatal("TUI execution failed: %v", err)
 		}
 		if outputPath == "" {
-			os.Exit(0)
-		}
-
-		reader := bufio.NewReader(os.Stdin)
-		fmt.Print("\nProceed with ISO synthesis now? [y/N]: ")
-		input, _ := reader.ReadString('\n')
-		input = strings.TrimSpace(input)
-		if strings.ToLower(input) != "y" {
-			fmt.Println("\nDeferred build. Execute the following command when ready:")
-			fmt.Printf("  sudo kagami --config %s\n\n", outputPath)
 			os.Exit(0)
 		}
 
