@@ -663,20 +663,12 @@ func (b *Builder) generateGrubConfig() string {
 		persistParam = "nopersistent"
 	}
 
-	installEntry := ""
+	var installEntry string
 	switch b.Config.Installer.Type {
 	case "ubiquity":
-		installEntry = fmt.Sprintf(`
-menuentry "Install %s" {
-   linux /%s/vmlinuz %s only-ubiquity quiet splash ---
-   initrd /%s/initrd
-}`, distName, liveDir, bootParam, liveDir)
+		installEntry = b.generateUbiquityGrubEntry()
 	case "calamares":
-		installEntry = fmt.Sprintf(`
-menuentry "Install %s" {
-   linux /%s/vmlinuz %s quiet splash ---
-   initrd /%s/initrd
-}`, distName, liveDir, bootParam, liveDir)
+		installEntry = b.generateCalamaresGrubEntry()
 	}
 
 	return fmt.Sprintf(`
@@ -718,6 +710,28 @@ fi
 
 `, distName, liveDir, bootParam, persistParam, liveDir, installEntry,
 		liveDir, bootParam, liveDir)
+}
+
+func (b *Builder) generateUbiquityGrubEntry() string {
+	distName := b.getDistName()
+	liveDir := b.liveDir()
+	bootParam := b.bootParam()
+	return fmt.Sprintf(`
+menuentry "Install %s (Ubiquity)" {
+   linux /%s/vmlinuz %s only-ubiquity quiet splash ---
+   initrd /%s/initrd
+}`, distName, liveDir, bootParam, liveDir)
+}
+
+func (b *Builder) generateCalamaresGrubEntry() string {
+	distName := b.getDistName()
+	liveDir := b.liveDir()
+	bootParam := b.bootParam()
+	return fmt.Sprintf(`
+menuentry "Install %s (Calamares)" {
+   linux /%s/vmlinuz %s quiet splash ---
+   initrd /%s/initrd
+}`, distName, liveDir, bootParam, liveDir)
 }
 
 func (b *Builder) cleanupChroot() error {
@@ -767,79 +781,104 @@ func (b *Builder) applyCalamaresConfig() error {
 func (b *Builder) configureMinimalInstaller() error {
 	fmt.Println("[INFO] Configuring minimal live installer environment...")
 
+	wm := b.Config.Packages.WM
+	if wm == "" {
+		wm = "openbox" // fallback
+	}
+
+	liveUser := "live"
+	if !b.isDebian() {
+		liveUser = "ubuntu"
+	}
+
+	sessionName := wm
+	if wm == "xfce4-minimal" {
+		sessionName = "xfce"
+	}
+
 	scripts := []string{
-		"useradd -m -G sudo -s /bin/bash live || true",
-		"echo 'live:live' | chpasswd",
-		"echo 'live ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/live",
+		fmt.Sprintf("useradd -m -G sudo -s /bin/bash %s || true", liveUser),
+		fmt.Sprintf("echo '%s:%s' | chpasswd", liveUser, liveUser),
+		fmt.Sprintf("echo '%s ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/live", liveUser),
 		"mkdir -p /etc/lightdm/lightdm.conf.d",
-		`cat > /etc/lightdm/lightdm.conf.d/50-autologin.conf <<'EOF'
+		fmt.Sprintf(`cat > /etc/lightdm/lightdm.conf.d/50-autologin.conf <<'EOF'
 [Seat:*]
-autologin-user=live
+autologin-user=%s
 autologin-user-timeout=0
-autologin-session=openbox
-user-session=openbox
-EOF`,
-		"mkdir -p /etc/xdg/autostart",
-		`cat > /etc/xdg/autostart/calamares-installer.desktop <<'EOF'
-[Desktop Entry]
-Type=Application
-Name=Install System
-Comment=Launch Calamares Installer
-Exec=sudo calamares
-Icon=calamares
-Terminal=false
-Categories=System;
-X-GNOME-Autostart-enabled=true
-NoDisplay=false
-EOF`,
-		"mkdir -p /etc/xdg/openbox",
-		`cat > /etc/xdg/openbox/autostart <<'EOFSCRIPT'
+autologin-session=%s
+user-session=%s
+EOF`, liveUser, sessionName, sessionName),
+	}
+
+	// WM specific autostart
+	switch wm {
+	case "openbox":
+		scripts = append(scripts,
+			"mkdir -p /etc/xdg/openbox",
+			`cat > /etc/xdg/openbox/autostart <<'EOFSCRIPT'
 #!/bin/sh
+# Ensure calamares-launcher is in path
+export PATH=$PATH:/usr/local/bin
 tint2 &
 feh --bg-fill /usr/share/backgrounds/default.png 2>/dev/null || xsetroot -solid "#2d2d2d" &
 dunst &
 lxpolkit &
 nm-applet &
 sleep 2
-sudo calamares &
+calamares-launcher &
 EOFSCRIPT`,
-		"chmod +x /etc/xdg/openbox/autostart",
+			"chmod +x /etc/xdg/openbox/autostart",
+		)
+	case "dwm":
+		scripts = append(scripts,
+			`cat > /usr/local/bin/dwm-session <<'EOFSCRIPT'
+#!/bin/sh
+export PATH=$PATH:/usr/local/bin
+feh --bg-fill /usr/share/backgrounds/default.png 2>/dev/null || xsetroot -solid "#2d2d2d" &
+dunst &
+lxpolkit &
+nm-applet &
+(sleep 2 && calamares-launcher) &
+exec dwm
+EOFSCRIPT`,
+			"chmod +x /usr/local/bin/dwm-session",
+			`cat > /usr/share/xsessions/dwm.desktop <<'EOF'
+[Desktop Entry]
+Name=dwm
+Comment=ALCI style dynamic window manager
+Exec=/usr/local/bin/dwm-session
+Type=Application
+EOF`,
+		)
+	case "xfce4-minimal":
+		scripts = append(scripts,
+			"mkdir -p /etc/xdg/autostart",
+			`cat > /etc/xdg/autostart/calamares-autostart.desktop <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Calamares Launcher
+Exec=calamares-launcher
+Icon=install-system
+Terminal=false
+X-GNOME-Autostart-enabled=true
+EOF`,
+		)
+	}
+
+	scripts = append(scripts,
+		"chmod +x /usr/bin/calamares-launcher /usr/bin/add-calamares-desktop-icon || true",
 		"mkdir -p /etc/polkit-1/localauthority/50-local.d",
-		`cat > /etc/polkit-1/localauthority/50-local.d/allow-calamares.pkla <<'EOF'
+		fmt.Sprintf(`cat > /etc/polkit-1/localauthority/50-local.d/allow-calamares.pkla <<'EOF'
 [Allow Calamares]
-Identity=unix-user:live
+Identity=unix-user:%s
 Action=*
 ResultAny=yes
 ResultInactive=yes
 ResultActive=yes
-EOF`,
-		"mkdir -p /home/live/Desktop",
-		`cat > /home/live/Desktop/install-system.desktop <<'EOF'
-[Desktop Entry]
-Type=Application
-Name=Install System
-Comment=Launch the system installer
-Exec=sudo calamares
-Icon=calamares
-Terminal=false
-Categories=System;
-EOF`,
-		"chmod +x /home/live/Desktop/install-system.desktop",
-		"chown -R live:live /home/live",
-		`cat > /home/live/Desktop/README.txt <<'EOF'
-Welcome to the Kagami Minimal Installer.
-
-This environment is designed exclusively for system installation.
-The Calamares installer should launch automatically.
-
-If it does not start, double-click "Install System" on the desktop,
-or execute: sudo calamares
-
-Remove the installation media and reboot after installation.
-EOF`,
-		"chown live:live /home/live/Desktop/README.txt",
+EOF`, liveUser),
+		fmt.Sprintf("chown -R %s:%s /home/%s", liveUser, liveUser, liveUser),
 		"systemctl enable lightdm || true",
-	}
+	)
 
 	for _, script := range scripts {
 		if err := b.chrootExec(script); err != nil {
@@ -855,21 +894,13 @@ func (b *Builder) setupCalamares() error {
 	fmt.Println("[INFO] Installing and configuring Calamares...")
 
 	installerPkgs := []string{"calamares"}
-	if b.isDebian() {
-		installerPkgs = append(installerPkgs, "calamares-settings-debian")
-	} else {
-		installerPkgs = append(installerPkgs, "calamares-settings-ubuntu")
-	}
-
 	installerList := strings.Join(installerPkgs, " ")
 	if err := b.chrootExec(fmt.Sprintf("DEBIAN_FRONTEND=noninteractive apt-get install -y %s", installerList)); err != nil {
 		log.Printf("[WARNING] Calamares installation failed: %v", err)
 	}
 
-	if !b.isDebian() {
-		if err := b.applyUbuntuCalamaresSettings(); err != nil {
-			log.Printf("[WARNING] Ubuntu Calamares settings application failed: %v", err)
-		}
+	if err := b.applyLocalCalamaresSettings(); err != nil {
+		log.Printf("[WARNING] Local Calamares settings application failed: %v", err)
 	}
 
 	if err := b.applyBranding(); err != nil {
@@ -883,28 +914,31 @@ func (b *Builder) setupCalamares() error {
 	return b.configureMinimalInstaller()
 }
 
-func (b *Builder) applyUbuntuCalamaresSettings() error {
+func (b *Builder) applyLocalCalamaresSettings() error {
 	cwd, _ := os.Getwd()
-	repoPath := filepath.Join(cwd, "Git/calamares-settings-ubuntu/lubuntu")
+	localDataPath := filepath.Join(cwd, "calamares/data")
 
-	if _, err := os.Stat(repoPath); err != nil {
-		return fmt.Errorf("Ubuntu Calamares settings repository not found at %s; clone the repository first", repoPath)
+	if _, err := os.Stat(localDataPath); err != nil {
+		return fmt.Errorf("local Calamares settings not found at %s", localDataPath)
 	}
 
-	fmt.Println("[INFO] Applying Lubuntu Calamares repository settings...")
+	fmt.Println("[INFO] Applying generic Calamares settings from project...")
 
-	destPath := filepath.Join(b.ChrootDir, "etc", "calamares")
-	os.MkdirAll(destPath, 0755)
-
-	cmds := []string{
-		fmt.Sprintf("cp -rv %s/branding/* %s/branding/", repoPath, destPath),
-		fmt.Sprintf("cp -v %s/settings.conf %s/", repoPath, destPath),
-		fmt.Sprintf("cp -rv %s/modules/* %s/modules/", repoPath, destPath),
+	cmd := exec.Command("cp", "-rv", localDataPath+"/.", b.ChrootDir+"/")
+	if err := cmd.Run(); err != nil {
+		return err
 	}
 
-	for _, cmdStr := range cmds {
-		cmd := exec.Command("bash", "-c", cmdStr)
-		cmd.Run()
+	// Update settings.conf branding based on target OS
+	brandingName := "ubuntu"
+	if b.isDebian() {
+		brandingName = "debian"
+	}
+
+	settingsPath := filepath.Join(b.ChrootDir, "etc", "calamares", "settings.conf")
+	if content, err := os.ReadFile(settingsPath); err == nil {
+		updated := strings.Replace(string(content), "branding: kagami", "branding: "+brandingName, 1)
+		os.WriteFile(settingsPath, []byte(updated), 0644)
 	}
 
 	return nil
@@ -919,7 +953,7 @@ func (b *Builder) applyBranding() error {
 	fmt.Println("[INFO] Applying custom branding to Calamares configuration...")
 
 	paths := []string{
-		filepath.Join(b.ChrootDir, "etc", "calamares/branding/lubuntu/branding.desc"),
+		filepath.Join(b.ChrootDir, "etc", "calamares/branding/ubuntu/branding.desc"),
 		filepath.Join(b.ChrootDir, "etc", "calamares/branding/debian/branding.desc"),
 		filepath.Join(b.ChrootDir, "etc", "calamares/branding/default/branding.desc"),
 	}

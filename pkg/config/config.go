@@ -63,6 +63,7 @@ type PackageConfig struct {
 	RemoveList    []string `json:"remove_list"`
 	Kernel        string   `json:"kernel"`
 	EnableFlatpak bool     `json:"enable_flatpak"`
+	WM            string   `json:"wm"`
 }
 
 type NetworkConfig struct {

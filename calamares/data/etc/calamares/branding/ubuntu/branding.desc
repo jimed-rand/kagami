@@ -1,0 +1,39 @@
+---
+componentName:   ubuntu
+welcomeStyleCalamares: true
+welcomeExpandingLogo: true
+windowExpanding: normal
+windowSize: 800px,580px
+windowPlacement: center
+
+strings:
+    productName:         Ubuntu
+    shortProductName:    Ubuntu
+    version:             (current)
+    shortVersion:        (current)
+    versionedName:       Ubuntu
+    shortVersionedName:  Ubuntu
+    bootloaderEntryName: Ubuntu
+    productUrl:          https://ubuntu.com
+    supportUrl:          https://ubuntu.com/support
+    knownIssuesUrl:      https://bugs.launchpad.net/ubuntu
+    releaseNotesUrl:     https://wiki.ubuntu.com/Releases
+    donateUrl:           https://ubuntu.com/community/donations
+
+sidebar: widget
+navigation: widget
+
+images:
+    productLogo:         "debian-logo.png"
+    productIcon:         "install-system.png"
+    productWelcome:      "welcome.png"
+
+slideshow:               "show.qml"
+
+style:
+   SidebarBackground:    "#26475b"
+   SidebarText:          "#FFFFFF"
+   SidebarTextCurrent:   "#fbfbfb"
+   SidebarBackgroundCurrent: "#265370"
+
+slideshowAPI: 2

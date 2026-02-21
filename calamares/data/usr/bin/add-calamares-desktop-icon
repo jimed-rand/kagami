@@ -1,0 +1,42 @@
+#!/bin/sh
+# Creates an "Install System" icon on the live session
+# Xfce, LXDE, LXqt, Gnome, KDE, Mate, Cinnamon
+
+# We query xdg-user-dir because the Desktop directory has different
+# names for different languages
+DESKTOP=$(xdg-user-dir DESKTOP)
+
+# Create ~/Desktop just in case this runs before the xdg folder
+# creation script.
+mkdir -p $DESKTOP
+
+if [ -f /usr/bin/lxsession ]; then
+    echo "[Desktop Entry]" > $DESKTOP/calamares-installer.desktop
+    echo "Type=Link" >> $DESKTOP/calamares-installer.desktop
+    echo "Name=Install System" >> $DESKTOP/calamares-installer.desktop
+    echo "Icon=install-system" >> $DESKTOP/calamares-installer.desktop
+    echo "URL=/usr/share/applications/calamares-installer.desktop" \
+          >> $DESKTOP/calamares-installer.desktop
+else
+    cp /usr/share/applications/calamares-installer.desktop $DESKTOP
+    # Xfce needs this executable otherwise it complains, everything
+    # else doesn't seem to care either way.
+    chmod +x $DESKTOP/calamares-installer.desktop
+fi
+
+# Set desktop launcher as trusted under Xfce (See: #1037299)
+if [ "$XDG_CURRENT_DESKTOP" = "XFCE" ]; then
+    gio set --type=string ~/Desktop/calamares-installer.desktop \
+        metadata::trusted true
+    gio set --type=string ~/Desktop/calamares-installer.desktop \
+        metadata::xfce-exe-checksum \
+        "$(sha256sum ~/Desktop/calamares-installer.desktop | cut -f1 -d' ')"
+    touch ~/Desktop/calamares-installer.desktop
+fi
+
+# Preload calamares binaries and libraries using idle disk cycles
+# so that it launches faster
+ionice -C Idle cat /usr/bin/calamares > /dev/null
+for file in $(ldd /usr/bin/calamares | awk '{print $3}'); do
+    ionice -C Idle cat $file > /dev/null
+done

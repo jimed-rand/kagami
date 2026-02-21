@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Install System
+GenericName=Calamares Installer
+Exec=calamares-launcher
+Comment=Calamares — Installer for live system
+Keywords=calamares;system;install;installer
+Icon=install-system
+Terminal=false
+Categories=Qt;System;
+StartupWMClass=calamares
+StartupNotify=True

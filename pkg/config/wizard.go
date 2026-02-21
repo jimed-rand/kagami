@@ -19,6 +19,7 @@ type WizardOption struct {
 
 func RunWizard() (*Config, string, error) {
 	reader := bufio.NewReader(os.Stdin)
+	var wmChoice string
 
 	fmt.Println()
 	fmt.Println("----------------------------------------------------------------")
@@ -77,10 +78,10 @@ func RunWizard() (*Config, string, error) {
 
 		wmOptions := []WizardOption{
 			{"openbox", "Openbox", "Lightweight stacking window manager (recommended)"},
-			{"i3", "i3", "Tiling window manager"},
+			{"dwm", "dwm", "Dynamic window manager (ALCI style)"},
 			{"xfce4-minimal", "Xfce4 (Minimal)", "Xfce4 panel and desktop only"},
 		}
-		wmChoice := promptChoice(reader, "Select window manager:", wmOptions)
+		wmChoice = promptChoice(reader, "Select window manager:", wmOptions)
 		desktop = "none"
 		additionalPkgs = getMinimalWMPackages(wmChoice)
 	} else {
@@ -208,10 +209,19 @@ func RunWizard() (*Config, string, error) {
 		fmt.Println("[ Calamares Branding ]")
 		fmt.Println("  Customise the installer product identity and support information.")
 		fmt.Println("----------------------------------------------------------------")
-		branding.ProductName = promptString(reader, "Product name [Kagami OS]:", "Kagami OS")
-		branding.ShortProductName = promptString(reader, "Short product name [Kagami]:", "Kagami")
-		branding.ProductUrl = promptString(reader, "Product URL [https://github.com/jimed-rand/kagami]:", "https://github.com/jimed-rand/kagami")
-		branding.SupportUrl = promptString(reader, "Support URL [https://github.com/jimed-rand/kagami/issues]:", "https://github.com/jimed-rand/kagami/issues")
+		defaultName := "Debian GNU/Linux"
+		defaultShortName := "Debian"
+		defaultURL := "https://www.debian.org"
+		if !isDebian {
+			defaultName = "Ubuntu"
+			defaultShortName = "Ubuntu"
+			defaultURL = "https://ubuntu.com"
+		}
+
+		branding.ProductName = promptString(reader, fmt.Sprintf("Product name [%s]:", defaultName), defaultName)
+		branding.ShortProductName = promptString(reader, fmt.Sprintf("Short product name [%s]:", defaultShortName), defaultShortName)
+		branding.ProductUrl = promptString(reader, fmt.Sprintf("Product URL [%s]:", defaultURL), defaultURL)
+		branding.SupportUrl = promptString(reader, fmt.Sprintf("Support URL [%s/support]:", defaultURL), defaultURL+"/support")
 		branding.Version = promptString(reader, fmt.Sprintf("Version [%s]:", release), release)
 	}
 	fmt.Println()
@@ -247,6 +257,7 @@ func RunWizard() (*Config, string, error) {
 		blockSnapd:     blockSnapd,
 		enableFirewall: enableFirewall,
 		enableFlatpak:  enableFlatpak,
+		wm:             wmChoice,
 	})
 
 	fmt.Println("[ Configuration Output ]")
@@ -309,6 +320,7 @@ type wizardParams struct {
 	enableFirewall bool
 	enableFlatpak  bool
 	kernel         string
+	wm             string
 }
 
 func buildWizardConfig(p wizardParams) *Config {
@@ -355,6 +367,7 @@ func buildWizardConfig(p wizardParams) *Config {
 			RemoveList:    removeList,
 			Kernel:        p.kernel,
 			EnableFlatpak: p.enableFlatpak,
+			WM:            p.wm,
 		},
 		Installer: InstallerConfig{
 			Type:      p.installerType,
@@ -440,8 +453,8 @@ func getMinimalWMPackages(wm string) []string {
 	switch wm {
 	case "openbox":
 		base = append(base, "openbox", "obconf", "tint2", "feh", "dunst", "lxpolkit")
-	case "i3":
-		base = append(base, "i3-wm", "i3status", "i3lock", "dmenu", "dunst", "lxpolkit", "feh")
+	case "dwm":
+		base = append(base, "dwm", "dmenu", "stterm", "feh", "dunst", "lxpolkit")
 	case "xfce4-minimal":
 		base = append(base,
 			"xfce4-panel", "xfce4-session", "xfce4-settings",
