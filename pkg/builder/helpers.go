@@ -530,7 +530,7 @@ func (b *Builder) configureAdditionalRepos() error {
 
 		components := strings.Join(repo.Components, " ")
 		repoLine := fmt.Sprintf("deb %s %s %s %s", signedByOpt, repo.URI, repo.Suite, components)
-		repoLine = strings.Replace(repoLine, "  ", " ", -1)
+		repoLine = strings.ReplaceAll(repoLine, "  ", " ")
 
 		repoFilePath := filepath.Join(b.ChrootDir, "etc", "apt", "sources.list.d", fmt.Sprintf("%s.list", repo.Name))
 

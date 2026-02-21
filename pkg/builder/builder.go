@@ -8,6 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
+
 	"kagami/pkg/config"
 	"kagami/pkg/system"
 )
@@ -56,7 +59,7 @@ func (b *Builder) getDistName() string {
 	}
 	if b.isDebian() {
 		if b.DebianAlias != "" {
-			return "Debian " + strings.Title(b.DebianAlias)
+			return "Debian " + cases.Title(language.English).String(b.DebianAlias)
 		}
 		return "Debian (" + b.Config.Release + ")"
 	}
@@ -1011,7 +1014,7 @@ func (b *Builder) resolveDebianRelease() {
 		if label != "" && version != "" {
 			b.PrettyName = fmt.Sprintf("%s %s", label, version)
 		} else if label != "" {
-			b.PrettyName = fmt.Sprintf("%s %s", label, strings.Title(alias))
+			b.PrettyName = fmt.Sprintf("%s %s", label, cases.Title(language.English).String(alias))
 		}
 	}
 }

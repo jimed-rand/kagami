@@ -339,7 +339,7 @@ func computeFileSize(path string) string {
 	return fmt.Sprintf("%.2f %s", size, units[idx])
 }
 
-func fatal(format string, v ...interface{}) {
+func fatal(format string, v ...any) {
 	timestamp := time.Now().Format("15:04:05")
 	fmt.Printf("[%s] [FATAL] %s\n", timestamp, fmt.Sprintf(format, v...))
 	os.Exit(1)
