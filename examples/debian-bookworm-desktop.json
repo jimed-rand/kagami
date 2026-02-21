@@ -1,8 +1,9 @@
 {
+  "distro": "debian",
   "release": "bookworm",
   "system": {
     "hostname": "debian-bookworm",
-    "block_snapd": true,
+    "block_snapd": false,
     "architecture": "amd64",
     "locale": "en_US.UTF-8",
     "timezone": "UTC"
@@ -14,17 +15,19 @@
   "packages": {
     "essential": [
       "sudo",
-      "casper",
+      "live-boot",
+      "live-boot-initramfs-tools",
+      "live-config",
+      "live-config-systemd",
       "discover",
       "laptop-detect",
       "os-prober",
       "network-manager",
       "net-tools",
       "wireless-tools",
-      "wpagui",
+      "wpasupplicant",
       "locales",
       "grub-common",
-      "grub-gfxpayload-lists",
       "grub-pc",
       "grub-pc-bin",
       "grub2-common",
@@ -52,7 +55,7 @@
   },
   "security": {
     "enable_firewall": false,
-    "block_snapd_forever": true,
+    "block_snapd_forever": false,
     "disable_services": []
   }
 }

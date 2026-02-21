@@ -1,10 +1,5 @@
 package builder
 
-// NOTE for non-APT distribution users:
-// If you are running Kagami on a non-APT system (e.g., Fedora, Arch, openSUSE),
-// it is recommended to run it inside a Distrobox container (Ubuntu/Debian)
-// with your home folder mapped to ensure proper file access and workspace management.
-
 import (
 	"fmt"
 	"log"
@@ -17,18 +12,16 @@ import (
 	"kagami/pkg/system"
 )
 
-// Builder handles the ISO building process
 type Builder struct {
 	Config      *config.Config
 	WorkDir     string
 	OutputISO   string
 	ChrootDir   string
 	ImageDir    string
-	DebianAlias string // stable, testing, or unstable
-	PrettyName  string // e.g. "Debian GNU/Linux 12"
+	DebianAlias string
+	PrettyName  string
 }
 
-// NewBuilder creates a new Builder instance
 func NewBuilder(cfg *config.Config, workDir, outputISO string) *Builder {
 	return &Builder{
 		Config:    cfg,
@@ -39,71 +32,77 @@ func NewBuilder(cfg *config.Config, workDir, outputISO string) *Builder {
 	}
 }
 
-// isDebian returns true if the release is a Debian release
 func (b *Builder) isDebian() bool {
 	return b.Config.Distro == "debian"
 }
 
-// getDistName returns the descriptive name of the distribution
+func (b *Builder) liveDir() string {
+	if b.isDebian() {
+		return "live"
+	}
+	return "casper"
+}
+
+func (b *Builder) bootParam() string {
+	if b.isDebian() {
+		return "boot=live"
+	}
+	return "boot=casper"
+}
+
 func (b *Builder) getDistName() string {
 	if b.PrettyName != "" {
 		return b.PrettyName
 	}
-
 	if b.isDebian() {
 		if b.DebianAlias != "" {
 			return "Debian " + strings.Title(b.DebianAlias)
 		}
 		return "Debian (" + b.Config.Release + ")"
 	}
-
 	switch b.Config.Release {
 	case "focal", "jammy", "noble", "resolute":
 		return "Ubuntu LTS"
 	case "devel":
 		return "Ubuntu Rolling"
 	default:
-		return "Ubuntu Custom"
+		return "Ubuntu"
 	}
 }
 
-// Build executes the complete build process
 func (b *Builder) Build() error {
-	// Resolve Debian aliases to codenames if needed
 	b.resolveDebianRelease()
 
 	steps := []struct {
 		name string
 		fn   func() error
 	}{
-		{"Checking prerequisites", b.checkPrerequisites},
-		{"Creating directories", b.createDirectories},
+		{"Verifying prerequisites", b.checkPrerequisites},
+		{"Initialising directory structure", b.createDirectories},
 		{"Bootstrapping base system", b.bootstrapSystem},
 		{"Mounting filesystems", b.mountFilesystems},
-		{"Configuring system", b.configureSystem},
-		{"Blocking snapd permanently", b.blockSnapd},
-		{"Installing packages", b.installPackages},
+		{"Configuring base system", b.configureSystem},
+		{"Applying snapd suppression", b.blockSnapd},
+		{"Installing package manifest", b.installPackages},
 		{"Installing desktop environment", b.installDesktop},
-
-		{"Configuring Flatpak", b.setupFlatpak},
+		{"Configuring Flatpak support", b.setupFlatpak},
 		{"Configuring bootloader", b.configureBootloader},
-		{"Cleaning up chroot", b.cleanupChroot},
-		{"Creating filesystem image", b.createFilesystem},
-		{"Creating ISO", b.createISO},
-		{"Cleaning up", b.cleanup},
+		{"Cleaning chroot environment", b.cleanupChroot},
+		{"Creating compressed filesystem", b.createFilesystem},
+		{"Synthesising ISO image", b.createISO},
+		{"Finalising build", b.cleanup},
 	}
 
 	for i, step := range steps {
 		fmt.Printf("[%d/%d] %s...\n", i+1, len(steps), step.name)
 		if err := step.fn(); err != nil {
-			return fmt.Errorf("%s failed: %v", step.name, err)
+			return fmt.Errorf("%s: %v", step.name, err)
 		}
 	}
 
 	return nil
 }
 
-// checkPrerequisites verifies required tools are installed
 func (b *Builder) checkPrerequisites() error {
 	required := []string{
 		"debootstrap",
@@ -116,31 +115,28 @@ func (b *Builder) checkPrerequisites() error {
 
 	for _, tool := range required {
 		if _, err := exec.LookPath(tool); err != nil {
-			return fmt.Errorf("required tool '%s' not found. Install with: sudo apt-get install %s", tool, tool)
+			return fmt.Errorf("required tool '%s' not found; install with: sudo apt-get install %s", tool, tool)
 		}
 	}
 
-	// Check if running as root
 	if os.Geteuid() != 0 {
-		return fmt.Errorf("this program must be run as root (use sudo)")
+		return fmt.Errorf("elevated privileges are required; re-execute with sudo")
 	}
 
-	// Environment-specific tips
 	if system.IsContainer() {
 		fmt.Println("[INFO] Container environment detected (Docker/Podman/Distrobox).")
-		fmt.Println("       Ensure the container has SYS_ADMIN privileges for mounting.")
+		fmt.Println("       Ensure the container has SYS_ADMIN capability for bind mounts.")
 	}
 
 	return nil
 }
 
-// createDirectories creates necessary directory structure
 func (b *Builder) createDirectories() error {
 	dirs := []string{
 		b.WorkDir,
 		b.ChrootDir,
 		b.ImageDir,
-		filepath.Join(b.ImageDir, "casper"),
+		filepath.Join(b.ImageDir, b.liveDir()),
 		filepath.Join(b.ImageDir, "isolinux"),
 		filepath.Join(b.ImageDir, "install"),
 	}
@@ -154,11 +150,9 @@ func (b *Builder) createDirectories() error {
 	return nil
 }
 
-// bootstrapSystem creates the base OS system using debootstrap
 func (b *Builder) bootstrapSystem() error {
-	// Check if chroot already exists
 	if _, err := os.Stat(filepath.Join(b.ChrootDir, "etc")); err == nil {
-		log.Println("Chroot already exists, skipping bootstrap")
+		log.Println("Chroot already exists; skipping bootstrap phase")
 		return nil
 	}
 
@@ -171,11 +165,10 @@ func (b *Builder) bootstrapSystem() error {
 		}
 	}
 
-	// If running devel, we bootstrap the latest LTS first
 	bootstrapRelease := b.Config.Release
 	if bootstrapRelease == "devel" {
-		bootstrapRelease = "noble" // Latest LTS
-		fmt.Println("[INFO] Bootstrapping with 'noble' (LTS) for devel target")
+		bootstrapRelease = "noble"
+		fmt.Println("[INFO] Bootstrapping with 'noble' as base for development target")
 	}
 
 	cmd := exec.Command("debootstrap",
@@ -190,50 +183,36 @@ func (b *Builder) bootstrapSystem() error {
 
 	if err := cmd.Run(); err != nil {
 		if system.IsContainer() {
-			return fmt.Errorf("debootstrap failed: %v\n[TIP] In a container, debootstrap requires '--privileged' or 'CAP_MKNOD' to create device nodes.", err)
+			return fmt.Errorf("debootstrap failed: %v\n[TIP] Container environments require '--privileged' or CAP_MKNOD for device node creation", err)
 		}
 		return err
 	}
 	return nil
 }
 
-// mountFilesystems mounts necessary filesystems for chroot
 func (b *Builder) mountFilesystems() error {
-	// ... (code omitted for brevity, no changes needed here but context helps)
 	mounts := []struct {
 		source string
 		target string
-		fstype string
 		flags  string
 	}{
-		{"/dev", filepath.Join(b.ChrootDir, "dev"), "", "bind"},
-		{"/run", filepath.Join(b.ChrootDir, "run"), "", "bind"},
+		{"/dev", filepath.Join(b.ChrootDir, "dev"), "bind"},
+		{"/run", filepath.Join(b.ChrootDir, "run"), "bind"},
 	}
 
 	for _, m := range mounts {
-		target := m.target
-
-		// Check if already mounted
-		if isMounted(target) {
+		if isMounted(m.target) {
 			continue
 		}
-
-		// Ensure target directory exists
-		if err := os.MkdirAll(target, 0755); err != nil {
-			return fmt.Errorf("failed to create mount target %s: %v", target, err)
+		if err := os.MkdirAll(m.target, 0755); err != nil {
+			return fmt.Errorf("failed to create mount target %s: %v", m.target, err)
 		}
 
-		var cmd *exec.Cmd
-		if m.flags == "bind" {
-			cmd = exec.Command("mount", "--bind", m.source, target)
-		} else {
-			cmd = exec.Command("mount", "-t", m.fstype, m.source, target)
-		}
-
+		cmd := exec.Command("mount", "--bind", m.source, m.target)
 		if err := cmd.Run(); err != nil {
-			errMsg := fmt.Errorf("failed to mount %s: %v", target, err)
+			errMsg := fmt.Errorf("failed to mount %s: %v", m.target, err)
 			if system.IsContainer() {
-				return fmt.Errorf("%v\n[TIP] In a container, this usually requires '--privileged' or 'CAP_SYS_ADMIN'.", errMsg)
+				return fmt.Errorf("%v\n[TIP] Container environments require '--privileged' or CAP_SYS_ADMIN", errMsg)
 			}
 			return errMsg
 		}
@@ -242,54 +221,42 @@ func (b *Builder) mountFilesystems() error {
 	return nil
 }
 
-// configureSystem performs basic system configuration
 func (b *Builder) configureSystem() error {
-	scripts := []string{
-		// Set hostname
+	initScripts := []string{
 		fmt.Sprintf("echo '%s' > /etc/hostname", b.Config.System.Hostname),
-
-		// Configure apt sources
 		b.generateSourcesList(),
-
-		// Mount internal filesystems
 		"mount none -t proc /proc 2>/dev/null || true",
 		"mount none -t sysfs /sys 2>/dev/null || true",
 		"mount none -t devpts /dev/pts 2>/dev/null || true",
-
-		// Set environment
 		"export HOME=/root",
 		"export LC_ALL=C",
 	}
 
-	for _, script := range scripts {
+	for _, script := range initScripts {
 		if err := b.chrootExec(script); err != nil {
 			return err
 		}
 	}
 
-	// Add additional repositories with keys (Ubuntu specific)
 	if err := b.configureAdditionalRepos(); err != nil {
-		log.Printf("Warning: Failed to configure additional repos: %v", err)
+		log.Printf("[WARNING] Additional repository configuration failed: %v", err)
 	}
 
-	// Continue with rest of configuration
-	moreScripts := []string{
-		// Update package lists
+	basePackages := "systemd-sysv"
+	if !b.isDebian() {
+		basePackages = "libterm-readline-gnu-perl systemd-sysv"
+	}
+
+	postScripts := []string{
 		"apt-get update",
-
-		// Install systemd
-		"DEBIAN_FRONTEND=noninteractive apt-get install -y libterm-readline-gnu-perl systemd-sysv",
-
-		// Configure machine-id
+		fmt.Sprintf("DEBIAN_FRONTEND=noninteractive apt-get install -y %s", basePackages),
 		"dbus-uuidgen > /etc/machine-id",
 		"ln -fs /etc/machine-id /var/lib/dbus/machine-id",
-
-		// Setup diversion for initctl
 		"dpkg-divert --local --rename --add /sbin/initctl",
 		"ln -s /bin/true /sbin/initctl",
 	}
 
-	for _, script := range moreScripts {
+	for _, script := range postScripts {
 		if err := b.chrootExec(script); err != nil {
 			return err
 		}
@@ -298,20 +265,16 @@ func (b *Builder) configureSystem() error {
 	return nil
 }
 
-// installPackages installs all required packages
 func (b *Builder) installPackages() error {
-	// Upgrade existing packages
 	if err := b.chrootExec("DEBIAN_FRONTEND=noninteractive apt-get -y dist-upgrade"); err != nil {
 		return err
 	}
 
-	// Install essential packages
 	essentialPkgs := strings.Join(b.Config.Packages.Essential, " ")
 	if err := b.chrootExec(fmt.Sprintf("DEBIAN_FRONTEND=noninteractive apt-get install -y %s", essentialPkgs)); err != nil {
 		return err
 	}
 
-	// Install kernel and headers
 	kernelPkg := b.Config.Packages.Kernel
 	if kernelPkg == "" {
 		kernelPkg = "linux-generic"
@@ -323,7 +286,6 @@ func (b *Builder) installPackages() error {
 		}
 	}
 
-	// Prepare headers package name
 	headersPkg := ""
 	if strings.HasPrefix(kernelPkg, "linux-image-") {
 		headersPkg = strings.Replace(kernelPkg, "linux-image-", "linux-headers-", 1)
@@ -340,44 +302,34 @@ func (b *Builder) installPackages() error {
 		return err
 	}
 
-	// Install additional packages
 	if len(b.Config.Packages.Additional) > 0 {
 		additionalPkgs := strings.Join(b.Config.Packages.Additional, " ")
 		if err := b.chrootExec(fmt.Sprintf("DEBIAN_FRONTEND=noninteractive apt-get install -y %s", additionalPkgs)); err != nil {
-			log.Printf("Warning: Some additional packages failed to install: %v", err)
+			log.Printf("[WARNING] Some additional packages failed to install: %v", err)
 		}
 	}
 
 	return nil
 }
 
-// blockSnapd implements comprehensive snapd blocking
 func (b *Builder) blockSnapd() error {
 	if !b.Config.Security.BlockSnapdForever && !b.Config.System.BlockSnapd {
 		return nil
 	}
 
-	fmt.Println("[ACTION] Implementing comprehensive snapd blocking...")
+	fmt.Println("[INFO] Implementing multi-layer snapd suppression...")
 
 	scripts := []string{
-		// Remove snapd packages if present
 		"apt-get purge -y snapd snap-confine ubuntu-core-launcher snapd-xdg-open || true",
 		"apt-get autoremove -y || true",
 		"rm -rf /var/cache/snapd /var/lib/snapd /var/snap /snap",
-
-		// Create APT preference to block snapd (refined for Ubuntu/Debian)
 		`cat > /etc/apt/preferences.d/nosnapd.pref <<'EOF'
-# Snapd is permanently blocked on this system
-Explanation: Snapd is permanently blocked on this system to prevent unwanted installation.
+Explanation: Snapd package installation is permanently prohibited on this system.
 Package: snapd
 Pin: release *
 Pin-Priority: -1
 
 Package: snapd:*
-Pin: release *
-Pin-Priority: -1
-
-Package: snapd-unwrapped
 Pin: release *
 Pin-Priority: -1
 
@@ -393,24 +345,17 @@ Package: snapd-xdg-open
 Pin: release *
 Pin-Priority: -1
 EOF`,
-
-		// Create systemd drop-in to prevent snapd service activation
 		"mkdir -p /etc/systemd/system/snapd.service.d",
 		`cat > /etc/systemd/system/snapd.service.d/override.conf <<'EOF'
 [Unit]
-# Snapd is permanently disabled on this system
 ConditionPathExists=!/etc/snapd-blocked
 
 [Service]
 ExecStart=
 ExecStart=/bin/false
 EOF`,
-
-		// Create marker file
 		"touch /etc/snapd-blocked",
-		`echo "Snapd is permanently blocked on this system" > /etc/snapd-blocked`,
-
-		// Block snapd socket
+		`echo "Snapd is permanently suppressed on this system." > /etc/snapd-blocked`,
 		"mkdir -p /etc/systemd/system/snapd.socket.d",
 		`cat > /etc/systemd/system/snapd.socket.d/override.conf <<'EOF'
 [Unit]
@@ -419,88 +364,62 @@ ConditionPathExists=!/etc/snapd-blocked
 [Socket]
 ListenStream=
 EOF`,
-
-		// Create hook to prevent snapd installation via apt
 		"mkdir -p /etc/apt/apt.conf.d",
 		`cat > /etc/apt/apt.conf.d/99-block-snapd <<'EOF'
-// Block snapd package installation
 DPkg::Pre-Install-Pkgs {
   "/usr/local/bin/block-snapd-hook";
 };
 EOF`,
-
-		// Create the blocking hook script
 		`cat > /usr/local/bin/block-snapd-hook <<'EOFSCRIPT'
-#!/bin/bash
-# Hook to prevent snapd installation
-
+#!/bin/sh
 while read pkg; do
-    if [[ "$pkg" == *"snapd"* ]]; then
-        echo "==========================================================" >&2
-        echo "ERROR: Installation of snapd is BLOCKED on this system!" >&2
-        echo "This distribution is configured to never use snapd." >&2
-        echo "==========================================================" >&2
-        exit 1
-    fi
+    case "$pkg" in
+        *snapd*)
+            echo "Installation of snapd is permanently prohibited on this system." >&2
+            exit 1
+            ;;
+    esac
 done
 EOFSCRIPT`,
-
 		"chmod +x /usr/local/bin/block-snapd-hook",
-
-		// Add warning to MOTD
 		"mkdir -p /etc/update-motd.d",
 		`cat > /etc/update-motd.d/99-snapd-blocked <<'EOF'
 #!/bin/sh
 echo ""
 echo "-----------------------------------------------------------"
-echo "  WARNING: Snapd is permanently blocked on this system     "
-echo "  Snap packages cannot be installed or used                "
+echo "  NOTICE: Snapd is permanently suppressed on this system.  "
+echo "  Snap package installation is not permitted.              "
 echo "-----------------------------------------------------------"
 echo ""
 EOF`,
-
 		"chmod +x /etc/update-motd.d/99-snapd-blocked",
-
-		// Create diversion for snapd package
 		"dpkg-divert --local --rename --add /usr/bin/snap || true",
 		"ln -sf /bin/false /usr/bin/snap || true",
-
-		// Remove any snap directories
 		"rm -rf /snap /var/snap /var/lib/snapd ~/snap || true",
-
-		// Add snapd blocking to profile
 		`cat >> /etc/profile.d/block-snapd.sh <<'EOF'
-# Snapd is blocked on this system
 export SNAPD_BLOCKED=1
-
-# Override snap command
 snap() {
-    echo "ERROR: Snapd is permanently blocked on this system" >&2
+    echo "Snapd is permanently suppressed on this system." >&2
     return 1
 }
 EOF`,
-
 		"chmod +x /etc/profile.d/block-snapd.sh",
 	}
 
 	for _, script := range scripts {
 		if err := b.chrootExec(script); err != nil {
-			log.Printf("Warning during snapd blocking: %v", err)
+			log.Printf("[WARNING] Snapd suppression step encountered an error: %v", err)
 		}
 	}
 
-	fmt.Println("[SUCCESS] Snapd blocked permanently with multiple layers of protection")
+	fmt.Println("[OK] Snapd suppression applied across all protection layers")
 	return nil
 }
 
-// installDesktop installs the selected desktop environment
 func (b *Builder) installDesktop() error {
-	// If desktop is "none", user is manually specifying packages in "additional"
-	// We just need to ensure ubiquity installer is installed
 	if b.Config.Packages.Desktop == "none" {
-		log.Println("Desktop set to 'none' - packages should be specified in 'additional' list")
+		log.Println("Desktop mode is 'none'; packages must be specified in the additional list")
 
-		// Install ubiquity if requested
 		if b.Config.Installer.Type == "ubiquity" {
 			installerPkgs := []string{
 				"ubiquity",
@@ -509,7 +428,6 @@ func (b *Builder) installDesktop() error {
 				"ubiquity-ubuntu-artwork",
 			}
 
-			// Add slideshow package based on config
 			slideshowMap := map[string]string{
 				"ubuntu":      "ubiquity-slideshow-ubuntu",
 				"kubuntu":     "ubiquity-slideshow-kubuntu",
@@ -524,18 +442,16 @@ func (b *Builder) installDesktop() error {
 
 			installerList := strings.Join(installerPkgs, " ")
 			if err := b.chrootExec(fmt.Sprintf("DEBIAN_FRONTEND=noninteractive apt-get install -y %s", installerList)); err != nil {
-				log.Printf("Warning: Some installer packages failed to install: %v", err)
+				log.Printf("[WARNING] Some installer packages failed to install: %v", err)
 			}
 		}
 
-		// Setup Calamares if requested
 		if b.Config.Installer.Type == "calamares" {
 			if err := b.setupCalamares(); err != nil {
-				log.Printf("Warning: Failed to setup Calamares: %v", err)
+				log.Printf("[WARNING] Calamares configuration failed: %v", err)
 			}
 		}
 
-		// Remove unwanted packages
 		if len(b.Config.Packages.RemoveList) > 0 {
 			removeList := strings.Join(b.Config.Packages.RemoveList, " ")
 			b.chrootExec(fmt.Sprintf("apt-get purge -y %s || true", removeList))
@@ -545,7 +461,7 @@ func (b *Builder) installDesktop() error {
 		return nil
 	}
 
-	desktopPackages := map[string][]string{
+	ubuntuDesktopPackages := map[string][]string{
 		"gnome": {
 			"vanilla-gnome-desktop",
 			"vanilla-gnome-default-settings",
@@ -557,51 +473,32 @@ func (b *Builder) installDesktop() error {
 			"adwaita-icon-theme",
 			"plymouth-themes",
 		},
-		"kde": {
-			"kde-plasma-desktop",
-		},
-		"xfce": {
-			"xfce4",
-			"xfce4-goodies",
-		},
-		"lxde": {
-			"lxde",
-		},
-		"lxqt": {
-			"lxqt",
-		},
-		"mate": {
-			"mate-desktop-environment",
-		},
+		"kde":  {"kde-plasma-desktop"},
+		"xfce": {"xfce4", "xfce4-goodies"},
+		"lxde": {"lxde"},
+		"lxqt": {"lxqt"},
+		"mate": {"mate-desktop-environment"},
 	}
 
-	// Override for Debian
+	debianDesktopPackages := map[string][]string{
+		"gnome": {"task-gnome-desktop"},
+		"kde":   {"task-kde-desktop"},
+		"xfce":  {"task-xfce-desktop"},
+		"lxde":  {"task-lxde-desktop"},
+		"lxqt":  {"task-lxqt-desktop"},
+		"mate":  {"task-mate-desktop"},
+	}
+
+	var desktopPackages map[string][]string
 	if b.isDebian() {
-		desktopPackages = map[string][]string{
-			"gnome": {
-				"task-gnome-desktop",
-			},
-			"kde": {
-				"task-kde-desktop",
-			},
-			"xfce": {
-				"task-xfce-desktop",
-			},
-			"lxde": {
-				"task-lxde-desktop",
-			},
-			"lxqt": {
-				"task-lxqt-desktop",
-			},
-			"mate": {
-				"task-mate-desktop",
-			},
-		}
+		desktopPackages = debianDesktopPackages
+	} else {
+		desktopPackages = ubuntuDesktopPackages
 	}
 
 	pkgs, ok := desktopPackages[b.Config.Packages.Desktop]
 	if !ok {
-		return fmt.Errorf("unknown desktop environment: %s", b.Config.Packages.Desktop)
+		return fmt.Errorf("unsupported desktop environment identifier: %s", b.Config.Packages.Desktop)
 	}
 
 	pkgList := strings.Join(pkgs, " ")
@@ -614,8 +511,7 @@ func (b *Builder) installDesktop() error {
 		return err
 	}
 
-	// Ensure the correct installer is installed based on config
-	if b.Config.Installer.Type == "ubiquity" {
+	if b.Config.Installer.Type == "ubiquity" && !b.isDebian() {
 		installerPkgs := []string{
 			"ubiquity",
 			"ubiquity-casper",
@@ -625,40 +521,23 @@ func (b *Builder) installDesktop() error {
 
 		installerList := strings.Join(installerPkgs, " ")
 		if err := b.chrootExec(fmt.Sprintf("DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends %s", installerList)); err != nil {
-			log.Printf("Warning: Some installer packages failed to install: %v", err)
+			log.Printf("[WARNING] Some installer packages failed to install: %v", err)
 		}
-
-		// Remove unnecessary slideshows
-		slideshowsToRemove := []string{
-			"ubiquity-slideshow-kubuntu",
-			"ubiquity-slideshow-xubuntu",
-			"ubiquity-slideshow-lubuntu",
-			"ubiquity-slideshow-ubuntu-mate",
-			"ubiquity-slideshow-ubuntu-budgie",
-			"ubiquity-slideshow-ubuntu",
-		}
-
-		purgeList := strings.Join(slideshowsToRemove, " ")
-		b.chrootExec(fmt.Sprintf("apt-get purge -y %s || true", purgeList))
 	}
 
-	// Install calamares if requested (for non-'none' desktop)
 	if b.Config.Installer.Type == "calamares" {
 		if err := b.setupCalamares(); err != nil {
-			log.Printf("Warning: Failed to setup Calamares: %v", err)
+			log.Printf("[WARNING] Calamares configuration failed: %v", err)
 		}
 	}
 
-	// Remove unwanted packages
 	if len(b.Config.Packages.RemoveList) > 0 {
 		removeList := strings.Join(b.Config.Packages.RemoveList, " ")
 		b.chrootExec(fmt.Sprintf("apt-get purge -y %s || true", removeList))
 	}
 
-	// Cleanup
 	b.chrootExec("apt-get autoremove -y")
 
-	// GNOME-specific vanilla improvements (inspired by ubuntu-debullshit)
 	if b.Config.Packages.Desktop == "gnome" && !b.isDebian() {
 		b.refineVanillaGNOME()
 	}
@@ -666,30 +545,23 @@ func (b *Builder) installDesktop() error {
 	return nil
 }
 
-// refineVanillaGNOME performs additional steps to ensure a vanilla GNOME experience on Ubuntu
 func (b *Builder) refineVanillaGNOME() error {
-	fmt.Println("[ACTION] Refining vanilla GNOME experience (Ubuntu)...")
+	fmt.Println("[INFO] Refining vanilla GNOME configuration for Ubuntu...")
 
 	scripts := []string{
-		// Remove Ubuntu-specific branding and themes
 		"apt-get purge -y ubuntu-session yaru-theme-gnome-shell yaru-theme-gtk yaru-theme-icon yaru-theme-sound || true",
-
-		// Ensure GNOME session is default
 		"update-alternatives --set gdm3-theme.desktop /usr/share/gnome-shell/theme/gnome-shell.css || true",
-
-		// Additional integration packages
 		"DEBIAN_FRONTEND=noninteractive apt-get install -y qgnomeplatform-qt5 qgnomeplatform-qt6 || true",
 	}
 
 	for _, script := range scripts {
 		if err := b.chrootExec(script); err != nil {
-			log.Printf("Warning during GNOME refinement: %v", err)
+			log.Printf("[WARNING] GNOME refinement step failed: %v", err)
 		}
 	}
 	return nil
 }
 
-// setupFlatpak checks if Flatpak is enabled and installs it
 func (b *Builder) setupFlatpak() error {
 	if !b.Config.Packages.EnableFlatpak {
 		return nil
@@ -697,13 +569,11 @@ func (b *Builder) setupFlatpak() error {
 	return b.installFlatpak()
 }
 
-// installFlatpak installs Flatpak and adds Flathub repository
 func (b *Builder) installFlatpak() error {
-	fmt.Println("[ACTION] Installing Flatpak and adding Flathub repository...")
+	fmt.Println("[INFO] Installing Flatpak and registering Flathub repository...")
 
 	pkgs := []string{"flatpak"}
 
-	// Add desktop-specific plugins only for GNOME and KDE
 	switch b.Config.Packages.Desktop {
 	case "gnome":
 		pkgs = append(pkgs, "gnome-software-plugin-flatpak")
@@ -716,26 +586,24 @@ func (b *Builder) installFlatpak() error {
 		return err
 	}
 
-	// Add Flathub repository mandatorily
 	return b.chrootExec("flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo")
 }
 
-// configureBootloader sets up GRUB and creates boot files
 func (b *Builder) configureBootloader() error {
-	// Determine kernel suffix for better matching
 	suffix := "generic"
 	if b.isDebian() {
 		suffix = "amd64"
 	}
 
 	if b.Config.Packages.Kernel != "" {
-		if strings.Contains(b.Config.Packages.Kernel, "lowlatency") {
+		switch {
+		case strings.Contains(b.Config.Packages.Kernel, "lowlatency"):
 			suffix = "lowlatency"
-		} else if strings.Contains(b.Config.Packages.Kernel, "oem") {
+		case strings.Contains(b.Config.Packages.Kernel, "oem"):
 			suffix = "oem"
-		} else if strings.Contains(b.Config.Packages.Kernel, "amd64") {
+		case strings.Contains(b.Config.Packages.Kernel, "amd64"):
 			suffix = "amd64"
-		} else if strings.Contains(b.Config.Packages.Kernel, "rt") {
+		case strings.Contains(b.Config.Packages.Kernel, "rt"):
 			suffix = "rt"
 		}
 	}
@@ -743,7 +611,6 @@ func (b *Builder) configureBootloader() error {
 	kernelPattern := filepath.Join(b.ChrootDir, "boot", "vmlinuz-*"+suffix+"*")
 	initrdPattern := filepath.Join(b.ChrootDir, "boot", "initrd.img-*"+suffix+"*")
 
-	// Fallback to broad pattern if specific one fails
 	kernels, _ := filepath.Glob(kernelPattern)
 	if len(kernels) == 0 {
 		kernelPattern = filepath.Join(b.ChrootDir, "boot", "vmlinuz-*")
@@ -752,30 +619,26 @@ func (b *Builder) configureBootloader() error {
 	}
 	initrds, _ := filepath.Glob(initrdPattern)
 
+	liveDestDir := filepath.Join(b.ImageDir, b.liveDir())
+
 	if len(kernels) > 0 {
-		// Sort or pick the latest? For simplicity, pick the first match for now
-		exec.Command("cp", kernels[0], filepath.Join(b.ImageDir, "casper", "vmlinuz")).Run()
+		exec.Command("cp", kernels[0], filepath.Join(liveDestDir, "vmlinuz")).Run()
 	}
 	if len(initrds) > 0 {
-		exec.Command("cp", initrds[0], filepath.Join(b.ImageDir, "casper", "initrd")).Run()
+		exec.Command("cp", initrds[0], filepath.Join(liveDestDir, "initrd")).Run()
 	}
 
-	// Download memtest86+
 	memtestURL := "https://memtest.org/download/v7.00/mt86plus_7.00.binaries.zip"
 	memtestZip := filepath.Join(b.ImageDir, "install", "memtest86.zip")
 
 	exec.Command("wget", "--progress=dot", memtestURL, "-O", memtestZip).Run()
-	exec.Command("unzip", "-p", memtestZip, "memtest64.bin").
-		Output() // We'll handle output separately
-	exec.Command("unzip", "-p", memtestZip, "memtest64.efi").
-		Output()
+	exec.Command("unzip", "-p", memtestZip, "memtest64.bin").Output()
+	exec.Command("unzip", "-p", memtestZip, "memtest64.efi").Output()
 	exec.Command("rm", "-f", memtestZip).Run()
 
-	// Create distribution marker file
 	markerFile := filepath.Join(b.ImageDir, "kagami-live")
 	os.WriteFile(markerFile, []byte(""), 0644)
 
-	// Create GRUB configuration
 	grubCfg := filepath.Join(b.ImageDir, "isolinux", "grub.cfg")
 	grubContent := b.generateGrubConfig()
 	if err := os.WriteFile(grubCfg, []byte(grubContent), 0644); err != nil {
@@ -785,24 +648,32 @@ func (b *Builder) configureBootloader() error {
 	return nil
 }
 
-// generateGrubConfig creates GRUB menu configuration
 func (b *Builder) generateGrubConfig() string {
 	distName := b.getDistName()
+	liveDir := b.liveDir()
+	bootParam := b.bootParam()
+
+	var persistParam string
+	if b.isDebian() {
+		persistParam = "nopersistence"
+	} else {
+		persistParam = "nopersistent"
+	}
 
 	installEntry := ""
 	switch b.Config.Installer.Type {
 	case "ubiquity":
 		installEntry = fmt.Sprintf(`
 menuentry "Install %s" {
-   linux /casper/vmlinuz boot=casper only-ubiquity quiet splash ---
-   initrd /casper/initrd
-}`, distName)
+   linux /%s/vmlinuz %s only-ubiquity quiet splash ---
+   initrd /%s/initrd
+}`, distName, liveDir, bootParam, liveDir)
 	case "calamares":
 		installEntry = fmt.Sprintf(`
 menuentry "Install %s" {
-   linux /casper/vmlinuz boot=casper quiet splash ---
-   initrd /casper/initrd
-}`, distName)
+   linux /%s/vmlinuz %s quiet splash ---
+   initrd /%s/initrd
+}`, distName, liveDir, bootParam, liveDir)
 	}
 
 	return fmt.Sprintf(`
@@ -818,34 +689,34 @@ set default="0"
 set timeout=30
 
 menuentry "Try %s without installing" {
-   linux /casper/vmlinuz boot=casper nopersistent toram quiet splash ---
-   initrd /casper/initrd
+   linux /%s/vmlinuz %s %s toram quiet splash ---
+   initrd /%s/initrd
 }
 %s
 
 menuentry "Check disc for defects" {
-   linux /casper/vmlinuz boot=casper integrity-check quiet splash ---
-   initrd /casper/initrd
+   linux /%s/vmlinuz %s integrity-check quiet splash ---
+   initrd /%s/initrd
 }
 
 if [ "$grub_platform" = "efi" ]; then
-menuentry 'UEFI Firmware Settings' {
+menuentry "UEFI Firmware Settings" {
    fwsetup
 }
 
-menuentry "Test memory Memtest86+ (UEFI)" {
+menuentry "Test memory (Memtest86+ UEFI)" {
    linux /install/memtest86+.efi
 }
 else
-menuentry "Test memory Memtest86+ (BIOS)" {
+menuentry "Test memory (Memtest86+ BIOS)" {
    linux16 /install/memtest86+.bin
 }
 fi
 
-`, distName, installEntry)
+`, distName, liveDir, bootParam, persistParam, liveDir, installEntry,
+		liveDir, bootParam, liveDir)
 }
 
-// cleanupChroot performs cleanup before creating filesystem image
 func (b *Builder) cleanupChroot() error {
 	scripts := []string{
 		"truncate -s 0 /etc/machine-id",
@@ -865,31 +736,24 @@ func (b *Builder) cleanupChroot() error {
 	return nil
 }
 
-// applyCalamaresConfig copies custom Calamares configuration to the chroot
 func (b *Builder) applyCalamaresConfig() error {
 	if b.Config.Installer.CalamaresConfig == "" {
 		return nil
 	}
 
-	fmt.Printf("[ACTION] Applying custom Calamares configuration from %s...\n", b.Config.Installer.CalamaresConfig)
+	fmt.Printf("[INFO] Applying custom Calamares configuration from: %s\n", b.Config.Installer.CalamaresConfig)
 
-	// Source path on host
 	srcPath := b.Config.Installer.CalamaresConfig
 	if !filepath.IsAbs(srcPath) {
 		cwd, _ := os.Getwd()
 		srcPath = filepath.Join(cwd, srcPath)
 	}
 
-	// Target path in chroot (usually /etc/calamares)
 	destPath := filepath.Join(b.ChrootDir, "etc", "calamares")
-
-	// Create directory if it doesn't exist
 	if err := os.MkdirAll(destPath, 0755); err != nil {
-		return fmt.Errorf("failed to create calamares config directory: %v", err)
+		return fmt.Errorf("failed to create calamares configuration directory: %v", err)
 	}
 
-	// Copy files
-	// Note: We use shell to handle globbing if source is a directory content
 	cmd := exec.Command("bash", "-c", fmt.Sprintf("cp -rv %s/* %s/", srcPath, destPath))
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -897,23 +761,13 @@ func (b *Builder) applyCalamaresConfig() error {
 	return cmd.Run()
 }
 
-// configureMinimalInstaller sets up the ALCI-style minimal live environment
-// where a lightweight WM auto-starts and Calamares is launched automatically.
-// This mimics the approach used by ALCI (Arch Linux Calamares Installer):
-//   - LightDM autologin to a 'live' user
-//   - XDG autostart .desktop file to launch Calamares
-//   - Openbox autostart (if openbox is the WM)
-//   - Polkit rule so Calamares can run without manual auth prompt
 func (b *Builder) configureMinimalInstaller() error {
-	fmt.Println("[ACTION] Configuring minimal installer environment (ALCI-style)...")
+	fmt.Println("[INFO] Configuring minimal live installer environment...")
 
 	scripts := []string{
-		// Create a live user for the live session
 		"useradd -m -G sudo -s /bin/bash live || true",
 		"echo 'live:live' | chpasswd",
 		"echo 'live ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/live",
-
-		// Configure LightDM autologin
 		"mkdir -p /etc/lightdm/lightdm.conf.d",
 		`cat > /etc/lightdm/lightdm.conf.d/50-autologin.conf <<'EOF'
 [Seat:*]
@@ -922,8 +776,6 @@ autologin-user-timeout=0
 autologin-session=openbox
 user-session=openbox
 EOF`,
-
-		// Create XDG autostart entry for Calamares (works for any WM/DE)
 		"mkdir -p /etc/xdg/autostart",
 		`cat > /etc/xdg/autostart/calamares-installer.desktop <<'EOF'
 [Desktop Entry]
@@ -937,37 +789,18 @@ Categories=System;
 X-GNOME-Autostart-enabled=true
 NoDisplay=false
 EOF`,
-
-		// Create Openbox autostart (for Openbox-based minimal ISOs)
 		"mkdir -p /etc/xdg/openbox",
 		`cat > /etc/xdg/openbox/autostart <<'EOFSCRIPT'
-#!/bin/bash
-# ALCI-style minimal installer autostart
-# Start a panel for basic navigation
+#!/bin/sh
 tint2 &
-
-# Set wallpaper
 feh --bg-fill /usr/share/backgrounds/default.png 2>/dev/null || xsetroot -solid "#2d2d2d" &
-
-# Start notification daemon
 dunst &
-
-# Start polkit agent
 lxpolkit &
-
-# Start network manager applet
 nm-applet &
-
-# Wait for desktop to settle
 sleep 2
-
-# Launch Calamares installer
 sudo calamares &
 EOFSCRIPT`,
-
 		"chmod +x /etc/xdg/openbox/autostart",
-
-		// Create a polkit rule so Calamares can run without password prompt
 		"mkdir -p /etc/polkit-1/localauthority/50-local.d",
 		`cat > /etc/polkit-1/localauthority/50-local.d/allow-calamares.pkla <<'EOF'
 [Allow Calamares]
@@ -977,8 +810,6 @@ ResultAny=yes
 ResultInactive=yes
 ResultActive=yes
 EOF`,
-
-		// Create desktop shortcut for Calamares on the desktop
 		"mkdir -p /home/live/Desktop",
 		`cat > /home/live/Desktop/install-system.desktop <<'EOF'
 [Desktop Entry]
@@ -990,93 +821,78 @@ Icon=calamares
 Terminal=false
 Categories=System;
 EOF`,
-
 		"chmod +x /home/live/Desktop/install-system.desktop",
 		"chown -R live:live /home/live",
-
-		// Create a simple README on the desktop
 		`cat > /home/live/Desktop/README.txt <<'EOF'
-Welcome to the Kagami Minimal Installer!
+Welcome to the Kagami Minimal Installer.
 
-This is a minimal live environment designed for system installation.
-The Calamares installer should start automatically.
+This environment is designed exclusively for system installation.
+The Calamares installer should launch automatically.
 
-If it doesn't start, double-click "Install System" on the desktop
-or run: sudo calamares
+If it does not start, double-click "Install System" on the desktop,
+or execute: sudo calamares
 
-After installation, remove the USB/CD and reboot.
+Remove the installation media and reboot after installation.
 EOF`,
-
 		"chown live:live /home/live/Desktop/README.txt",
-
-		// Enable LightDM
 		"systemctl enable lightdm || true",
 	}
 
 	for _, script := range scripts {
 		if err := b.chrootExec(script); err != nil {
-			log.Printf("Warning during minimal installer setup: %v", err)
+			log.Printf("[WARNING] Minimal installer configuration step failed: %v", err)
 		}
 	}
 
-	fmt.Println("[SUCCESS] Minimal installer environment configured (ALCI-style)")
+	fmt.Println("[OK] Minimal live installer environment configured")
 	return nil
 }
 
-// setupCalamares performs comprehensive Calamares configuration
 func (b *Builder) setupCalamares() error {
-	fmt.Println("[ACTION] Setting up Calamares installer...")
+	fmt.Println("[INFO] Installing and configuring Calamares...")
 
 	installerPkgs := []string{"calamares"}
 	if b.isDebian() {
 		installerPkgs = append(installerPkgs, "calamares-settings-debian")
 	} else {
-		// For Ubuntu, we use the package as base but will override with git repo if possible
 		installerPkgs = append(installerPkgs, "calamares-settings-ubuntu")
 	}
 
 	installerList := strings.Join(installerPkgs, " ")
 	if err := b.chrootExec(fmt.Sprintf("DEBIAN_FRONTEND=noninteractive apt-get install -y %s", installerList)); err != nil {
-		log.Printf("Warning: Calamares failed to install: %v", err)
+		log.Printf("[WARNING] Calamares installation failed: %v", err)
 	}
 
-	// For Ubuntu, apply settings from the Lubuntu git repository if cloned
 	if !b.isDebian() {
 		if err := b.applyUbuntuCalamaresSettings(); err != nil {
-			log.Printf("Warning: Could not apply Lubuntu git settings: %v", err)
+			log.Printf("[WARNING] Ubuntu Calamares settings application failed: %v", err)
 		}
 	}
 
-	// Apply custom branding information
 	if err := b.applyBranding(); err != nil {
-		log.Printf("Warning: Failed to apply branding to Calamares: %v", err)
+		log.Printf("[WARNING] Calamares branding application failed: %v", err)
 	}
 
-	// Apply custom Calamares configuration directory (overwrites everything else)
 	if err := b.applyCalamaresConfig(); err != nil {
-		log.Printf("Warning: Failed to apply custom Calamares configuration: %v", err)
+		log.Printf("[WARNING] Custom Calamares configuration failed: %v", err)
 	}
 
-	// Configure minimal installer autostart (ALCI-style)
 	return b.configureMinimalInstaller()
 }
 
-// applyUbuntuCalamaresSettings uses the Lubuntu settings repository
 func (b *Builder) applyUbuntuCalamaresSettings() error {
 	cwd, _ := os.Getwd()
 	repoPath := filepath.Join(cwd, "Git/calamares-settings-ubuntu/lubuntu")
 
 	if _, err := os.Stat(repoPath); err != nil {
-		return fmt.Errorf("ubuntu calamares settings repo not found at %s. Please clone it first", repoPath)
+		return fmt.Errorf("Ubuntu Calamares settings repository not found at %s; clone the repository first", repoPath)
 	}
 
-	fmt.Println("[ACTION] Incorporating settings from Lubuntu Calamares repository...")
+	fmt.Println("[INFO] Applying Lubuntu Calamares repository settings...")
 
 	destPath := filepath.Join(b.ChrootDir, "etc", "calamares")
 	os.MkdirAll(destPath, 0755)
 
-	// Copy modules, branding and settings
-	// We use shell to handle the copy recursively
 	cmds := []string{
 		fmt.Sprintf("cp -rv %s/branding/* %s/branding/", repoPath, destPath),
 		fmt.Sprintf("cp -v %s/settings.conf %s/", repoPath, destPath),
@@ -1091,16 +907,14 @@ func (b *Builder) applyUbuntuCalamaresSettings() error {
 	return nil
 }
 
-// applyBranding modifies branding.desc in the chroot
 func (b *Builder) applyBranding() error {
 	branding := b.Config.Installer.Branding
 	if branding.ProductName == "" {
 		return nil
 	}
 
-	fmt.Println("[ACTION] Applying custom branding to Calamares settings...")
+	fmt.Println("[INFO] Applying custom branding to Calamares configuration...")
 
-	// Possible paths for branding.desc
 	paths := []string{
 		filepath.Join(b.ChrootDir, "etc", "calamares/branding/lubuntu/branding.desc"),
 		filepath.Join(b.ChrootDir, "etc", "calamares/branding/debian/branding.desc"),
@@ -1116,7 +930,7 @@ func (b *Builder) applyBranding() error {
 	}
 
 	if brandingFile == "" {
-		return fmt.Errorf("could not find branding.desc to modify")
+		return fmt.Errorf("branding.desc not found in expected locations")
 	}
 
 	content, err := os.ReadFile(brandingFile)
@@ -1127,15 +941,16 @@ func (b *Builder) applyBranding() error {
 	lines := strings.Split(string(content), "\n")
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "productName:") {
+		switch {
+		case strings.HasPrefix(trimmed, "productName:"):
 			lines[i] = "    productName:         " + branding.ProductName
-		} else if strings.HasPrefix(trimmed, "shortProductName:") {
+		case strings.HasPrefix(trimmed, "shortProductName:"):
 			lines[i] = "    shortProductName:    " + branding.ShortProductName
-		} else if strings.HasPrefix(trimmed, "productUrl:") {
+		case strings.HasPrefix(trimmed, "productUrl:"):
 			lines[i] = "    productUrl:          " + branding.ProductUrl
-		} else if strings.HasPrefix(trimmed, "supportUrl:") {
+		case strings.HasPrefix(trimmed, "supportUrl:"):
 			lines[i] = "    supportUrl:          " + branding.SupportUrl
-		} else if strings.HasPrefix(trimmed, "version=") {
+		case strings.HasPrefix(trimmed, "version="):
 			lines[i] = "version=" + branding.Version
 		}
 	}
@@ -1143,7 +958,6 @@ func (b *Builder) applyBranding() error {
 	return os.WriteFile(brandingFile, []byte(strings.Join(lines, "\n")), 0644)
 }
 
-// resolveDebianRelease fetches the real codename for stable, testing, or unstable
 func (b *Builder) resolveDebianRelease() {
 	if !b.isDebian() {
 		return
@@ -1155,36 +969,35 @@ func (b *Builder) resolveDebianRelease() {
 	}
 
 	b.DebianAlias = alias
-	fmt.Printf("[ACTION] Resolving Debian %s codename...\n", alias)
+	fmt.Printf("[INFO] Resolving Debian '%s' alias to current codename...\n", alias)
 
 	mirror := b.Config.Repository.Mirror
 	if mirror == "" {
 		mirror = "http://deb.debian.org/debian/"
 	}
 
-	// Fetch Release file from mirror
 	url := fmt.Sprintf("%sdists/%s/Release", mirror, alias)
 	cmd := exec.Command("wget", "-qO-", url)
 	output, err := cmd.Output()
 	if err != nil {
-		log.Printf("Warning: Could not resolve Debian codename via net (offline?), using alias %s", alias)
+		log.Printf("[WARNING] Could not resolve Debian codename via network; proceeding with alias '%s'", alias)
 		return
 	}
 
-	lines := strings.Split(string(output), "\n")
 	var label, version, codename string
-	for _, line := range lines {
-		if strings.HasPrefix(line, "Codename:") {
+	for _, line := range strings.Split(string(output), "\n") {
+		switch {
+		case strings.HasPrefix(line, "Codename:"):
 			parts := strings.Fields(line)
 			if len(parts) >= 2 {
 				codename = parts[1]
 			}
-		} else if strings.HasPrefix(line, "Label:") {
+		case strings.HasPrefix(line, "Label:"):
 			parts := strings.SplitN(line, ":", 2)
 			if len(parts) == 2 {
 				label = strings.TrimSpace(parts[1])
 			}
-		} else if strings.HasPrefix(line, "Version:") {
+		case strings.HasPrefix(line, "Version:"):
 			parts := strings.SplitN(line, ":", 2)
 			if len(parts) == 2 {
 				version = strings.TrimSpace(parts[1])
@@ -1193,7 +1006,7 @@ func (b *Builder) resolveDebianRelease() {
 	}
 
 	if codename != "" {
-		fmt.Printf("[INFO] Debian %s resolved to codename: %s\n", alias, codename)
+		fmt.Printf("[INFO] Debian '%s' resolved to codename: %s\n", alias, codename)
 		b.Config.Release = codename
 		if label != "" && version != "" {
 			b.PrettyName = fmt.Sprintf("%s %s", label, version)

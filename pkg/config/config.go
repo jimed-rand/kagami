@@ -1,20 +1,15 @@
 package config
 
-// NOTE for non-APT distribution users:
-// If you are running Kagami on a non-APT system (e.g., Fedora, Arch, openSUSE),
-// it is recommended to run it inside a Distrobox container (Ubuntu/Debian)
-// with your home folder mapped to ensure proper file access and workspace management.
-
 import (
 	"encoding/json"
 	"errors"
 	"os"
+	"strings"
 )
 
-// Config represents the build configuration
 type Config struct {
-	Distro     string           `json:"distro"`  // ubuntu or debian
-	Release    string           `json:"release"` // noble, stable, testing, etc.
+	Distro     string           `json:"distro"`
+	Release    string           `json:"release"`
 	System     SystemConfig     `json:"system"`
 	Repository RepositoryConfig `json:"repository"`
 	Packages   PackageConfig    `json:"packages"`
@@ -23,7 +18,6 @@ type Config struct {
 	Security   SecurityConfig   `json:"security"`
 }
 
-// SystemConfig contains system-level configurations
 type SystemConfig struct {
 	Hostname     string `json:"hostname"`
 	BlockSnapd   bool   `json:"block_snapd"`
@@ -32,32 +26,28 @@ type SystemConfig struct {
 	Timezone     string `json:"timezone"`
 }
 
-// RepositoryConfig defines APT repository settings
 type RepositoryConfig struct {
 	Mirror          string           `json:"mirror"`
 	UseProposed     bool             `json:"use_proposed"`
 	AdditionalRepos []AdditionalRepo `json:"additional_repos"`
 }
 
-// AdditionalRepo represents an additional APT repository
 type AdditionalRepo struct {
 	Name       string   `json:"name"`
 	URI        string   `json:"uri"`
 	Suite      string   `json:"suite"`
 	Components []string `json:"components"`
-	Key        string   `json:"key"` // URL to GPG key or inline key
+	Key        string   `json:"key"`
 }
 
-// InstallerConfig defines installer preferences
 type InstallerConfig struct {
-	Type            string            `json:"type"`             // ubiquity, subiquity, or calamares
-	Slideshow       string            `json:"slideshow"`        // ubuntu, kubuntu, xubuntu, lubuntu, ubuntu-mate
-	CalamaresConfig string            `json:"calamares_config"` // Path to custom Calamares configuration directory
-	Branding        BrandingConfig    `json:"branding"`         // Custom branding information for Calamares
-	Settings        map[string]string `json:"settings"`         // Additional installer settings
+	Type            string            `json:"type"`
+	Slideshow       string            `json:"slideshow"`
+	CalamaresConfig string            `json:"calamares_config"`
+	Branding        BrandingConfig    `json:"branding"`
+	Settings        map[string]string `json:"settings"`
 }
 
-// BrandingConfig defines branding information for the installer
 type BrandingConfig struct {
 	ProductName      string `json:"product_name"`
 	ShortProductName string `json:"short_product_name"`
@@ -66,31 +56,43 @@ type BrandingConfig struct {
 	Version          string `json:"version"`
 }
 
-// PackageConfig defines package installation preferences
 type PackageConfig struct {
 	Essential     []string `json:"essential"`
 	Additional    []string `json:"additional"`
-	Desktop       string   `json:"desktop"` // gnome, kde, xfce, lxde, mate, none
+	Desktop       string   `json:"desktop"`
 	RemoveList    []string `json:"remove_list"`
-	Kernel        string   `json:"kernel"` // linux-generic, linux-lowlatency, etc.
+	Kernel        string   `json:"kernel"`
 	EnableFlatpak bool     `json:"enable_flatpak"`
 }
 
-// NetworkConfig for network settings
 type NetworkConfig struct {
-	Manager string `json:"manager"` // network-manager, systemd-networkd
+	Manager string `json:"manager"`
 }
 
-// SecurityConfig for security hardening
 type SecurityConfig struct {
 	EnableFirewall    bool     `json:"enable_firewall"`
 	DisableServices   []string `json:"disable_services"`
 	BlockSnapdForever bool     `json:"block_snapd_forever"`
 }
 
-// NewDefaultConfig creates a default configuration for the specified release
+func inferDistro(cfg *Config) string {
+	debianCodenames := map[string]bool{
+		"stable": true, "testing": true, "unstable": true, "sid": true,
+		"bookworm": true, "trixie": true, "bullseye": true, "buster": true,
+		"forky": true, "stretch": true, "jessie": true,
+	}
+	if debianCodenames[strings.ToLower(cfg.Release)] {
+		return "debian"
+	}
+	if strings.Contains(cfg.Repository.Mirror, "debian.org") {
+		return "debian"
+	}
+	return "ubuntu"
+}
+
 func NewDefaultConfig(release string) *Config {
 	return &Config{
+		Distro:  "ubuntu",
 		Release: release,
 		System: SystemConfig{
 			Hostname:     "ubuntu-kagami",
@@ -160,63 +162,49 @@ func NewDefaultConfig(release string) *Config {
 	}
 }
 
-// Validate checks if the configuration is valid
 func (c *Config) Validate() error {
 	if c.Distro == "" {
-		return errors.New("distro must be specified (ubuntu or debian)")
+		c.Distro = inferDistro(c)
 	}
 
-	if c.Distro == "debian" {
-		validDebian := map[string]bool{"stable": true, "testing": true, "unstable": true, "sid": true}
-		if !validDebian[c.Release] {
-			// If not an alias, we'll allow it but it might be a specific codename
-		}
-	} else {
+	if c.Distro != "ubuntu" && c.Distro != "debian" {
+		return errors.New("distro must be either 'ubuntu' or 'debian'")
+	}
+
+	if c.Distro == "ubuntu" {
 		validUbuntu := map[string]bool{
-			"focal": true, "jammy": true, "noble": true, "resolute": true, "devel": true,
+			"focal": true, "jammy": true, "noble": true,
+			"resolute": true, "devel": true,
 		}
 		if !validUbuntu[c.Release] {
-			return errors.New("invalid Ubuntu release. Must be one of: focal, jammy, noble, resolute, devel")
+			return errors.New("unsupported Ubuntu release; accepted values: focal, jammy, noble, resolute, devel")
 		}
 	}
 
 	if c.System.Architecture != "amd64" && c.System.Architecture != "i386" && c.System.Architecture != "arm64" {
-		return errors.New("invalid architecture. Must be amd64, i386 or arm64")
+		return errors.New("unsupported architecture; accepted values: amd64, i386, arm64")
 	}
 
 	validDesktops := map[string]bool{
-		"gnome": true,
-		"kde":   true,
-		"xfce":  true,
-		"lxde":  true,
-		"lxqt":  true,
-		"mate":  true,
-		"none":  true,
+		"gnome": true, "kde": true, "xfce": true,
+		"lxde": true, "lxqt": true, "mate": true, "none": true,
 	}
-
 	if !validDesktops[c.Packages.Desktop] {
-		return errors.New("invalid desktop environment")
+		return errors.New("unsupported desktop environment identifier")
 	}
 
 	validInstallers := map[string]bool{
 		"ubiquity":  true,
 		"subiquity": true,
-		"calamares": true, // Added support for Calamares
+		"calamares": true,
 	}
-
 	if !validInstallers[c.Installer.Type] {
-		return errors.New("invalid installer type. Must be ubiquity, subiquity, or calamares")
+		return errors.New("unsupported installer type; accepted values: ubiquity, subiquity, calamares")
 	}
 
 	return nil
 }
 
-// Preset Repositories
-const (
-	RepoUbuntuArchive = "http://archive.ubuntu.com/ubuntu/"
-)
-
-// LoadFromFile loads configuration from a JSON file
 func LoadFromFile(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -228,15 +216,17 @@ func LoadFromFile(path string) (*Config, error) {
 		return nil, err
 	}
 
+	if cfg.Distro == "" {
+		cfg.Distro = inferDistro(&cfg)
+	}
+
 	return &cfg, nil
 }
 
-// SaveToFile saves configuration to a JSON file
 func (c *Config) SaveToFile(path string) error {
 	data, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
 		return err
 	}
-
 	return os.WriteFile(path, data, 0644)
 }

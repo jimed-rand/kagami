@@ -11,145 +11,129 @@ import (
 	"strings"
 )
 
-// WizardOption represents a selectable option in the wizard
 type WizardOption struct {
 	Key         string
 	Label       string
 	Description string
 }
 
-// RunWizard runs the interactive configuration wizard and returns a Config
 func RunWizard() (*Config, string, error) {
 	reader := bufio.NewReader(os.Stdin)
 
 	fmt.Println()
 	fmt.Println("----------------------------------------------------------------")
 	fmt.Println("               Kagami Configuration Wizard")
-	fmt.Println("           Interactive ISO Build Configuration")
+	fmt.Println("         Interactive ISO Build Configuration Interface")
 	fmt.Println("----------------------------------------------------------------")
 	fmt.Println()
 
-	// --- Distribution ---------------------------------------------------
 	fmt.Println("[ Distribution ]")
 	distOptions := []WizardOption{
-		{"ubuntu", "Ubuntu", "Ubuntu-based ISO"},
-		{"debian", "Debian", "Debian-based ISO (Stable, Testing, or Unstable)"},
+		{"ubuntu", "Ubuntu", "Ubuntu-based ISO synthesis"},
+		{"debian", "Debian", "Debian-based ISO synthesis (Stable, Testing, or Unstable)"},
 	}
-
 	distChoice := promptChoice(reader, "Select base distribution:", distOptions)
 	isDebian := distChoice == "debian"
 	fmt.Println()
 
-	// --- Release --------------------------------------------------------
 	fmt.Println("[ Release ]")
 	var releaseOptions []WizardOption
 	if isDebian {
 		releaseOptions = []WizardOption{
-			{"stable", "Stable", "Debian Stable (latest)"},
-			{"testing", "Testing", "Debian Testing (latest)"},
-			{"unstable", "Unstable", "Debian Unstable/Sid"},
+			{"stable", "Stable", "Debian Stable (current)"},
+			{"testing", "Testing", "Debian Testing (current)"},
+			{"unstable", "Unstable", "Debian Unstable / Sid"},
+			{"bookworm", "Bookworm", "Debian 12"},
+			{"trixie", "Trixie", "Debian 13"},
 		}
-
 	} else {
 		releaseOptions = []WizardOption{
 			{"noble", "Noble Numbat", "Ubuntu 24.04 LTS"},
-			{"resolute", "Resolute", "Ubuntu 26.04 LTS (Upcoming)"},
+			{"resolute", "Resolute Rambutan", "Ubuntu 26.04 LTS (upcoming)"},
 			{"jammy", "Jammy Jellyfish", "Ubuntu 22.04 LTS"},
-			{"devel", "Development", "Ubuntu Rolling/Development"},
+			{"devel", "Development", "Ubuntu Rolling Development"},
 		}
 	}
 	release := promptChoice(reader, "Select release:", releaseOptions)
 	fmt.Println()
 
-	// --- Build Mode -----------------------------------------------------
 	fmt.Println("[ Build Mode ]")
 	modeOptions := []WizardOption{
-		{"desktop", "Desktop ISO", "Full desktop environment with installer"},
-		{"minimal", "Minimal Installer", "Minimal live environment (like ALCI) - boots into WM with Calamares installer only"},
+		{"desktop", "Desktop ISO", "Full desktop environment with graphical installer"},
+		{"minimal", "Minimal Installer", "Minimal live environment with Calamares auto-launch"},
 	}
 	buildMode := promptChoice(reader, "Select build mode:", modeOptions)
 	isMinimal := buildMode == "minimal"
 	fmt.Println()
 
-	// --- Desktop / WM Selection -----------------------------------------
 	var desktop string
 	var additionalPkgs []string
 
 	if isMinimal {
-		// Minimal installer mode (ALCI-style)
 		fmt.Println("[ Window Manager (Minimal Installer) ]")
-		fmt.Println("  The minimal installer boots into a lightweight WM with")
-		fmt.Println("  Calamares auto-started. Similar to ALCI (Arch Linux")
-		fmt.Println("  Calamares Installer).")
+		fmt.Println("  The minimal installer boots directly into a lightweight window")
+		fmt.Println("  manager with the Calamares installer launched automatically.")
 		fmt.Println("----------------------------------------------------------------")
 
 		wmOptions := []WizardOption{
-			{"openbox", "Openbox", "Lightweight stacking WM (recommended, ~50MB)"},
-			{"i3", "i3", "Tiling window manager (~20MB)"},
-			{"xfce4-minimal", "Xfce4 (Minimal)", "Xfce4 panel + Desktop only (~150MB)"},
+			{"openbox", "Openbox", "Lightweight stacking window manager (recommended)"},
+			{"i3", "i3", "Tiling window manager"},
+			{"xfce4-minimal", "Xfce4 (Minimal)", "Xfce4 panel and desktop only"},
 		}
-		wmChoice := promptChoice(reader, "Select window manager for live environment:", wmOptions)
-
+		wmChoice := promptChoice(reader, "Select window manager:", wmOptions)
 		desktop = "none"
-		additionalPkgs = getMinimalWMPackages(wmChoice, distChoice)
-
+		additionalPkgs = getMinimalWMPackages(wmChoice)
 	} else {
 		fmt.Println("[ Desktop Environment ]")
 		var desktopOptions []WizardOption
-
 		if isDebian {
 			desktopOptions = []WizardOption{
-				{"xfce", "Xfce", "Lightweight and fast (task-xfce-desktop)"},
-				{"gnome", "GNOME", "Modern full-featured desktop (task-gnome-desktop)"},
-				{"kde", "KDE Plasma", "Feature-rich and customizable (task-kde-desktop)"},
+				{"xfce", "Xfce", "Lightweight desktop (task-xfce-desktop)"},
+				{"gnome", "GNOME", "Full-featured modern desktop (task-gnome-desktop)"},
+				{"kde", "KDE Plasma", "Feature-rich Qt-based desktop (task-kde-desktop)"},
 				{"lxqt", "LXQt", "Lightweight Qt-based desktop (task-lxqt-desktop)"},
-				{"mate", "MATE", "Traditional GNOME 2 fork (task-mate-desktop)"},
-				{"lxde", "LXDE", "Very lightweight GTK desktop (task-lxde-desktop)"},
-				{"none", "None (Vanilla)", "Manually specify packages in additional list"},
+				{"mate", "MATE", "Traditional GNOME 2 continuation (task-mate-desktop)"},
+				{"lxde", "LXDE", "Lightweight GTK-based desktop (task-lxde-desktop)"},
+				{"none", "None (Manual)", "Specify packages explicitly in the additional list"},
 			}
 		} else {
 			desktopOptions = []WizardOption{
-				{"gnome", "GNOME", "Ubuntu GNOME Desktop"},
-				{"kde", "KDE Plasma", "Kubuntu Desktop"},
-				{"xfce", "Xfce", "Xubuntu Desktop"},
-				{"mate", "MATE", "Ubuntu MATE Desktop"},
-				{"lxqt", "LXQt", "Lubuntu Desktop (LXQt)"},
-				{"lxde", "LXDE", "Lubuntu Desktop (LXDE)"},
-				{"none", "None (Vanilla)", "Manually specify packages in additional list"},
+				{"gnome", "GNOME", "Ubuntu GNOME desktop"},
+				{"kde", "KDE Plasma", "Kubuntu desktop"},
+				{"xfce", "Xfce", "Xubuntu desktop"},
+				{"mate", "MATE", "Ubuntu MATE desktop"},
+				{"lxqt", "LXQt", "Lubuntu desktop (LXQt)"},
+				{"lxde", "LXDE", "Lubuntu desktop (LXDE)"},
+				{"none", "None (Manual)", "Specify packages explicitly in the additional list"},
 			}
 		}
 		desktop = promptChoice(reader, "Select desktop environment:", desktopOptions)
 	}
 	fmt.Println()
 
-	// --- Installer ------------------------------------------------------
 	var installerType string
 	var slideshow string
 
-	if isMinimal {
-		// Minimal mode always uses Calamares
+	if isMinimal || isDebian {
 		installerType = "calamares"
 		fmt.Println("[ Installer ]")
-		fmt.Println("  Minimal installer mode uses Calamares (auto-configured).")
-		fmt.Println("----------------------------------------------------------------")
-	} else if isDebian {
-		// Debian defaults to Calamares
-		installerType = "calamares"
-		fmt.Println("[ Installer ]")
-		fmt.Println("  Debian uses Calamares as the default installer.")
+		if isMinimal {
+			fmt.Println("  Minimal build mode employs Calamares as the graphical installer.")
+		} else {
+			fmt.Println("  Debian builds employ Calamares as the graphical installer.")
+		}
 		fmt.Println("----------------------------------------------------------------")
 	} else {
-		// Ubuntu: choice between ubiquity and calamares
 		fmt.Println("[ Installer ]")
 		installerOptions := []WizardOption{
-			{"ubiquity", "Ubiquity", "Traditional Ubuntu installer (GTK-based)"},
-			{"calamares", "Calamares", "Universal installer framework (modern, distro-agnostic)"},
+			{"ubiquity", "Ubiquity", "Traditional Ubuntu GTK-based installer"},
+			{"calamares", "Calamares", "Universal distro-agnostic installer framework"},
 		}
 		installerType = promptChoice(reader, "Select installer:", installerOptions)
 
 		if installerType == "ubiquity" {
 			slideshowOptions := []WizardOption{
-				{"ubuntu", "Ubuntu", "Default Ubuntu slideshow"},
+				{"ubuntu", "Ubuntu", "Standard Ubuntu slideshow"},
 				{"kubuntu", "Kubuntu", "KDE Plasma slideshow"},
 				{"xubuntu", "Xubuntu", "Xfce slideshow"},
 				{"lubuntu", "Lubuntu", "LXQt slideshow"},
@@ -160,8 +144,7 @@ func RunWizard() (*Config, string, error) {
 	}
 	fmt.Println()
 
-	// --- System Settings ------------------------------------------------
-	fmt.Println("[ System Settings ]")
+	fmt.Println("[ System Configuration ]")
 	defaultHostname := distChoice
 	if isMinimal {
 		defaultHostname += "-minimal"
@@ -170,41 +153,37 @@ func RunWizard() (*Config, string, error) {
 	} else {
 		defaultHostname += "-desktop"
 	}
-	hostname := promptString(reader, fmt.Sprintf("Hostname [%s]:", defaultHostname), defaultHostname)
+	hostname := promptString(reader, fmt.Sprintf("System hostname [%s]:", defaultHostname), defaultHostname)
 	fmt.Println()
 
-	// --- Architecture ---------------------------------------------------
 	archOptions := []WizardOption{
-		{"amd64", "amd64", "64-bit x86 (most common)"},
+		{"amd64", "amd64", "64-bit x86 (standard)"},
 		{"arm64", "arm64", "64-bit ARM"},
 	}
-	arch := promptChoice(reader, "Select architecture:", archOptions)
+	arch := promptChoice(reader, "Target architecture:", archOptions)
 	fmt.Println()
 
-	// --- Kernel ---------------------------------------------------------
 	fmt.Println("[ Kernel Selection ]")
 	var kernelOptions []WizardOption
 	if isDebian {
 		kernelOptions = []WizardOption{
-			{"linux-image-amd64", "Standard", "Default Debian kernel"},
-			{"linux-image-rt-amd64", "Real-time", "Real-time kernel for low latency tasks"},
-			{"linux-image-cloud-amd64", "Cloud", "Optimized for cloud/virtual environments"},
+			{"linux-image-amd64", "Standard", "Standard Debian kernel"},
+			{"linux-image-rt-amd64", "Real-time", "Real-time kernel for latency-sensitive workloads"},
+			{"linux-image-cloud-amd64", "Cloud", "Optimised for virtualised cloud environments"},
 		}
 	} else {
 		kernelOptions = []WizardOption{
 			{"linux-generic", "Generic", "Standard Ubuntu kernel (recommended)"},
-			{"linux-lowlatency", "Low-latency", "Reduced latency kernel (audio/pro-style)"},
-			{"linux-oem-24.04", "OEM", "OEM kernel (latest stabilized)"},
+			{"linux-lowlatency", "Low-latency", "Reduced-latency kernel for audio and professional use"},
+			{"linux-oem-24.04", "OEM", "OEM stabilised kernel"},
 		}
 	}
-
-	kernel := promptChoice(reader, "Select kernel:", kernelOptions)
+	kernel := promptChoice(reader, "Select kernel variant:", kernelOptions)
 	fmt.Println()
 
-	// --- Additional Packages --------------------------------------------
 	fmt.Println("[ Additional Packages ]")
-	fmt.Println("  Enter additional packages (comma-separated), or press")
-	fmt.Println("  Enter to use defaults.")
+	fmt.Println("  Specify additional packages as a comma-separated list,")
+	fmt.Println("  or press Enter to proceed with defaults.")
 	fmt.Println("----------------------------------------------------------------")
 	extraPkgsInput := promptString(reader, "Additional packages:", "")
 	if extraPkgsInput != "" {
@@ -217,48 +196,41 @@ func RunWizard() (*Config, string, error) {
 	}
 	fmt.Println()
 
-	// --- Mirror ---------------------------------------------------------
 	defaultMirror := "http://archive.ubuntu.com/ubuntu/"
 	if isDebian {
 		defaultMirror = "http://deb.debian.org/debian/"
 	}
-	mirror := promptString(reader, fmt.Sprintf("APT mirror [%s]:", defaultMirror), defaultMirror)
+	mirror := promptString(reader, fmt.Sprintf("APT repository mirror [%s]:", defaultMirror), defaultMirror)
 	fmt.Println()
 
-	// --- Calamares Branding ---------------------------------------------
 	var branding BrandingConfig
 	if installerType == "calamares" {
 		fmt.Println("[ Calamares Branding ]")
-		fmt.Println("  Customize the installer's name and information.")
+		fmt.Println("  Customise the installer product identity and support information.")
 		fmt.Println("----------------------------------------------------------------")
-		branding.ProductName = promptString(reader, "Product Name [Kagami OS]:", "Kagami OS")
-		branding.ShortProductName = promptString(reader, "Short Product Name [Kagami]:", "Kagami")
+		branding.ProductName = promptString(reader, "Product name [Kagami OS]:", "Kagami OS")
+		branding.ShortProductName = promptString(reader, "Short product name [Kagami]:", "Kagami")
 		branding.ProductUrl = promptString(reader, "Product URL [https://github.com/jimed-rand/kagami]:", "https://github.com/jimed-rand/kagami")
 		branding.SupportUrl = promptString(reader, "Support URL [https://github.com/jimed-rand/kagami/issues]:", "https://github.com/jimed-rand/kagami/issues")
 		branding.Version = promptString(reader, fmt.Sprintf("Version [%s]:", release), release)
 	}
 	fmt.Println()
 
-	// --- Application Support --------------------------------------------
 	fmt.Println("[ Application Support ]")
 	enableFlatpakStr := promptString(reader, "Enable Flatpak support? [Y/n]:", "Y")
 	enableFlatpak := strings.ToLower(enableFlatpakStr) != "n"
 	fmt.Println()
 
-	// --- Security -------------------------------------------------------
-	fmt.Println("[ Security ]")
+	fmt.Println("[ Security Configuration ]")
 	blockSnapd := true
 	if !isDebian {
-		blockSnapdStr := promptString(reader, "Block snapd? [Y/n]:", "Y")
+		blockSnapdStr := promptString(reader, "Apply permanent snapd suppression? [Y/n]:", "Y")
 		blockSnapd = strings.ToLower(blockSnapdStr) != "n"
 	}
-	fwStr := promptString(reader, "Enable firewall (ufw)? [y/N]:", "N")
-
+	fwStr := promptString(reader, "Enable UFW firewall? [y/N]:", "N")
 	enableFirewall := strings.ToLower(fwStr) == "y"
-
 	fmt.Println()
 
-	// --- Generate Configuration -----------------------------------------
 	cfg := buildWizardConfig(wizardParams{
 		distro:         distChoice,
 		release:        release,
@@ -277,29 +249,25 @@ func RunWizard() (*Config, string, error) {
 		enableFlatpak:  enableFlatpak,
 	})
 
-	// --- Save Configuration ---------------------------------------------
-	fmt.Println("[ Save Configuration ]")
+	fmt.Println("[ Configuration Output ]")
 	defaultOutputName := fmt.Sprintf("%s-%s-%s.json", distChoice, release, desktop)
 	if isMinimal {
 		defaultOutputName = fmt.Sprintf("%s-%s-minimal.json", distChoice, release)
 	}
 
 	configDir, _ := system.GetAppPaths()
-	// Ensure directory exists
 	if err := os.MkdirAll(configDir, 0755); err != nil {
-		fmt.Printf("[WARNING] Failed to create config directory %s: %v\n", configDir, err)
-		// Fallback to current directory
+		fmt.Printf("[WARNING] Could not create configuration directory %s: %v\n", configDir, err)
 		configDir = "."
 	}
 
 	defaultOutputPath := filepath.Join(configDir, defaultOutputName)
-	outputPath := promptString(reader, fmt.Sprintf("Output file [%s]:", defaultOutputPath), defaultOutputPath)
+	outputPath := promptString(reader, fmt.Sprintf("Output file path [%s]:", defaultOutputPath), defaultOutputPath)
 	fmt.Println()
 
-	// --- Preview --------------------------------------------------------
 	prettyJSON, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to marshal config: %v", err)
+		return nil, "", fmt.Errorf("configuration serialisation failed: %v", err)
 	}
 
 	fmt.Println("----------------------------------------------------------------")
@@ -308,29 +276,27 @@ func RunWizard() (*Config, string, error) {
 	fmt.Println(string(prettyJSON))
 	fmt.Println()
 
-	confirm := promptString(reader, "Save this configuration? [Y/n]:", "Y")
+	confirm := promptString(reader, "Persist this configuration? [Y/n]:", "Y")
 	if strings.ToLower(confirm) == "n" {
 		fmt.Println("Configuration discarded.")
 		return cfg, "", nil
 	}
 
-	// Save to file
 	if err := cfg.SaveToFile(outputPath); err != nil {
-		return nil, "", fmt.Errorf("failed to save config: %v", err)
+		return nil, "", fmt.Errorf("configuration persistence failed: %v", err)
 	}
 
 	absPath, _ := filepath.Abs(outputPath)
-	fmt.Printf("\n[SUCCESS] Configuration saved to: %s\n", absPath)
-	fmt.Printf("[INFO] Build with: sudo kagami --config %s\n\n", absPath)
+	fmt.Printf("\n[OK] Configuration persisted to: %s\n", absPath)
+	fmt.Printf("[INFO] Initiate build with: sudo kagami --config %s\n\n", absPath)
 
 	return cfg, outputPath, nil
 }
 
 type wizardParams struct {
-	distro    string
-	release   string
-	isMinimal bool
-
+	distro         string
+	release        string
+	isMinimal      bool
 	desktop        string
 	additionalPkgs []string
 	installerType  string
@@ -346,14 +312,10 @@ type wizardParams struct {
 }
 
 func buildWizardConfig(p wizardParams) *Config {
-	// Essential packages differ between Ubuntu and Debian
 	essential := getEssentialPackages(p.distro)
-
-	// Default additional packages
 	defaultAdditional := []string{"vim", "curl", "wget", "git", "htop"}
 	additional := append(defaultAdditional, p.additionalPkgs...)
 
-	// Remove list
 	var removeList []string
 	var disableServices []string
 	if p.distro == "ubuntu" {
@@ -371,11 +333,10 @@ func buildWizardConfig(p wizardParams) *Config {
 		}
 	}
 
-	cfg := &Config{
+	return &Config{
 		Distro:  p.distro,
 		Release: p.release,
 		System: SystemConfig{
-
 			Hostname:     p.hostname,
 			BlockSnapd:   p.blockSnapd,
 			Architecture: p.arch,
@@ -400,7 +361,6 @@ func buildWizardConfig(p wizardParams) *Config {
 			Slideshow: p.slideshow,
 			Branding:  p.branding,
 		},
-
 		Network: NetworkConfig{
 			Manager: "network-manager",
 		},
@@ -410,27 +370,25 @@ func buildWizardConfig(p wizardParams) *Config {
 			DisableServices:   disableServices,
 		},
 	}
-
-	return cfg
 }
 
-// getEssentialPackages returns the essential packages list for the distro
 func getEssentialPackages(distro string) []string {
 	if distro == "debian" {
-
 		return []string{
 			"sudo",
-			"casper",
+			"live-boot",
+			"live-boot-initramfs-tools",
+			"live-config",
+			"live-config-systemd",
 			"discover",
 			"laptop-detect",
 			"os-prober",
 			"network-manager",
 			"net-tools",
 			"wireless-tools",
-			"wpagui",
+			"wpasupplicant",
 			"locales",
 			"grub-common",
-			"grub-gfxpayload-lists",
 			"grub-pc",
 			"grub-pc-bin",
 			"grub2-common",
@@ -464,11 +422,7 @@ func getEssentialPackages(distro string) []string {
 	}
 }
 
-// getMinimalWMPackages returns the package list for a minimal ALCI-style live
-// environment: a WM + Xorg + display manager + terminal + Calamares autostart
-func getMinimalWMPackages(wm string, _ string) []string {
-
-	// Common base packages for any minimal WM installer ISO
+func getMinimalWMPackages(wm string) []string {
 	base := []string{
 		"xorg",
 		"xinit",
@@ -485,49 +439,27 @@ func getMinimalWMPackages(wm string, _ string) []string {
 
 	switch wm {
 	case "openbox":
-		base = append(base,
-			"openbox",
-			"obconf",
-			"tint2",
-			"feh",
-			"dunst",
-			"lxpolkit",
-		)
+		base = append(base, "openbox", "obconf", "tint2", "feh", "dunst", "lxpolkit")
 	case "i3":
-		base = append(base,
-			"i3-wm",
-			"i3status",
-			"i3lock",
-			"dmenu",
-			"dunst",
-			"lxpolkit",
-			"feh",
-		)
+		base = append(base, "i3-wm", "i3status", "i3lock", "dmenu", "dunst", "lxpolkit", "feh")
 	case "xfce4-minimal":
 		base = append(base,
-			"xfce4-panel",
-			"xfce4-session",
-			"xfce4-settings",
-			"xfce4-terminal",
-			"xfdesktop4",
-			"xfwm4",
-			"thunar",
+			"xfce4-panel", "xfce4-session", "xfce4-settings",
+			"xfce4-terminal", "xfdesktop4", "xfwm4", "thunar",
 		)
 	}
 
 	return base
 }
 
-// --- Helper functions -------------------------------------------------------
-
 func promptChoice(reader *bufio.Reader, prompt string, options []WizardOption) string {
 	fmt.Println(prompt)
 	for i, opt := range options {
-		fmt.Printf("  %d) %-20s %s\n", i+1, opt.Label, opt.Description)
+		fmt.Printf("  %d) %-22s %s\n", i+1, opt.Label, opt.Description)
 	}
 
 	for {
-		fmt.Print("\n  Enter choice [1]: ")
+		fmt.Print("\n  Selection [1]: ")
 		input, _ := reader.ReadString('\n')
 		input = strings.TrimSpace(input)
 
@@ -537,7 +469,7 @@ func promptChoice(reader *bufio.Reader, prompt string, options []WizardOption) s
 
 		idx, err := strconv.Atoi(input)
 		if err != nil || idx < 1 || idx > len(options) {
-			fmt.Printf("  Invalid choice. Please enter 1-%d.\n", len(options))
+			fmt.Printf("  Invalid selection. Enter a value between 1 and %d.\n", len(options))
 			continue
 		}
 		return options[idx-1].Key

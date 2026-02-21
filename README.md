@@ -1,174 +1,228 @@
-# Kagami: A Comprehensive System for Automated Ubuntu ISO Synthesis
+# Kagami: A Comprehensive System for Automated Debian/Ubuntu ISO Synthesis
 
 ## Abstract
 
-Kagami is a specialized orchestration framework designed for the deterministic synthesis of Ubuntu-based operating system images. The system prioritizes the deployment of vanilla desktop environments and the implementation of immutable restrictions on the snapd package management daemon. By utilizing a modular configuration-driven approach, Kagami enables the generation of streamlined, high-performance distributions tailored to specific computational requirements.
+Kagami is a specialised orchestration framework designed for the deterministic synthesis of Debian and Ubuntu-based operating system images. The system prioritises the deployment of vanilla desktop environments and the implementation of permanent restrictions on the snapd package management daemon where applicable. Through a modular, configuration-driven architecture, Kagami enables the generation of streamlined, high-performance distributions tailored to specific computational requirements.
 
 ## Etymology and Nomenclature
 
-The designation "Kagami" is derived from the Japanese term for "mirror" (kagami). This nomenclature serves a dual purpose:
-
-1. **Philosophical Reflection**: The system is designed to provide a direct and undistorted reflection of the user's specified configuration within the resulting installation medium. 
-2. **Cultural Reference**: The project acknowledges an inspiration from the character Kagami Hiiragi of the anime series "Lucky Star," reflecting the developer's cultural influences and the project's identity.
+The designation "Kagami" derives from the Japanese term for "mirror" (鏡). This nomenclature serves a dual purpose: the system is designed to provide an undistorted reflection of the user's specified configuration within the resulting installation medium, and the project acknowledges an inspiration from the character Kagami Hiiragi of the anime series "Lucky Star."
 
 ## Functional Domain and Features
 
-Kagami facilitates the following technical objectives:
+- Vanilla desktop environment synthesis supporting nine distinct environments (GNOME, KDE Plasma, Xfce, and others)
+- Permanent snapd constraint via a seven-layer defensive architecture (Ubuntu builds)
+- Automated dependency resolution and installation
+- Cross-architecture support for both UEFI and BIOS boot protocols (x86_64)
+- Full Debian live system support using `live-boot` and `live-config`
+- Interactive configuration wizard for guided ISO specification
 
-- **Vanilla Desktop Environment Proliferation**: Support for nine distinct desktop environments, including GNOME, KDE Plasma, XFCE, and others, emphasizing core component installation without extraneous software bloat.
-- **Permanent Snapd Constraint**: Implementation of a seven-layer defensive architecture to prevent the initialization or execution of the snapd service.
-- **Automated Dependency Resolution**: Recursive verification and installation of required system utilities to ensure operational parity.
-- **Cross-Architecture Compatibility**: Provision of support for both UEFI and BIOS boot protocols within the x86_64 architecture.
+## Debian vs Ubuntu Architecture
+
+| Aspect | Ubuntu | Debian |
+|---|---|---|
+| Live system | casper | live-boot + live-config |
+| Live directory | /casper/ | /live/ |
+| Boot parameter | boot=casper | boot=live |
+| EFI package | grub-efi-amd64-signed | grub-efi-amd64 |
+| Installer | ubiquity or calamares | calamares |
+| Desktop meta | vanilla packages | task-*-desktop |
+| Snapd blocking | 7-layer enforcement | not applicable |
 
 ## System Prerequisites
 
 ### Distribution Support
 
-Kagami is optimized for execution on Advanced Package Tool (APT) based environments:
-- Ubuntu (LTS and current interim releases)
-- Debian (Stable and testing branches)
-- Derivative distributions (e.g., Linux Mint, Elementary OS)
+Kagami is optimised for execution on APT-based host environments: Ubuntu (LTS and current interim releases), Debian (Stable, Testing, and Unstable branches), and derivative distributions (Linux Mint, Elementary OS, etc.).
 
-**Note**: Non-APT distributions (e.g., Fedora, Arch, openSUSE) and APT-RPM based systems (e.g., ALT Linux) are explicitly unsupported.
+Non-APT distributions (Fedora, Arch, openSUSE) and APT-RPM based systems (ALT Linux) are not supported as build hosts.
 
-**Tip for non-APT Users**: If you are running a non-APT distribution, it is highly recommended to use **Distrobox** (via Docker or Podman) to create a compatible Ubuntu or Debian container. Ensure that your container is configured to use your **home folder** (which is the default in Distrobox) so that Kagami can properly access the source code and manage the build workspace.
+For non-APT users, employ Distrobox (via Docker or Podman) to create a compatible Ubuntu or Debian container. Ensure the container maps your home directory to preserve workspace access.
 
 ### Computational Requirements
 
-- **Memory**: Minimum of 4GB allocated RAM; 8GB recommended for concurrent build processes.
-- **Storage**: Minimum of 15GB of unallocated disk space for temporary chroot environments and final image synthesis.
-- **Privileges**: Administrative (root) access is mandatory for filesystem manipulation and package management.
+- Memory: minimum 4 GB allocated RAM; 8 GB recommended for concurrent build processes
+- Storage: minimum 15 GB of available disk space for the chroot environment and ISO synthesis
+- Privileges: root access is mandatory for filesystem manipulation and package management
 
-## Methodological Installation
+## Installation
 
-### Source-Based Implementation
+### Source-Based
 
-```bash
+```
 git clone https://github.com/jimed-rand/kagami.git
 cd kagami
 make build
 sudo make install
 ```
 
-### Dependency Procurement
+### Dependency Installation
 
-Users must verify environmental compatibility and procure necessary utilities:
-
-```bash
+```
 make check-prereqs
 sudo make install-deps
 ```
 
-Required utilities include `debootstrap`, `squashfs-tools`, `xorriso`, `grub-pc-bin`, `grub-efi-amd64-bin`, `mtools`, `dosfstools`, `isolinux`, and `syslinux`.
+Required utilities: `debootstrap`, `squashfs-tools`, `xorriso`, `grub-pc-bin`, `grub-efi-amd64-bin`, `mtools`, `dosfstools`, `isolinux`, `syslinux`.
 
 ## Operational Usage
 
-### 1. Build and Prepare
+### 1. Build the Binary
 
-First, build the Kagami binary. This generates a statically linked, portable binary:
-
-```bash
+```
 make build
 ```
 
-Then, ensure all required build dependencies are installed on your system:
+### 2. Install Build Dependencies
 
-```bash
+```
 sudo ./kagami --install-deps
 ```
 
-### 2. Configuration Wizard (Recommended)
+### 3. Configuration Wizard
 
-Kagami includes an interactive wizard to help you design your custom ISO easily. It will guide you through selecting the distribution, desktop environment, kernel, and extra packages.
-
-```bash
+```
 sudo ./kagami --wizard
 ```
 
-**Workflow:**
-- The wizard generates a `.json` configuration file based on your choices.
-- At the end of the process, it will offer to **build the ISO immediately**.
-- Alternatively, you can choose to save the configuration and **build it later** manually.
+The wizard generates a `.json` configuration file and optionally initiates the build immediately.
 
-### 3. Manual Build Execution
+### 4. Direct Build Execution
 
-If you already have a configuration file, you can initiate the synthesis directly:
-
-```bash
-sudo ./kagami --config path/to/your-config.json
+```
+sudo ./kagami --config path/to/config.json
 ```
 
-### Argument Specification
+## CLI Reference
 
-- `--wizard`: Launches the interactive configuration wizard.
-- `--config`: Path to the JSON configuration file.
-- `--install-deps`: Automatically installs all required system utilities.
-- `--check-deps`: Verifies if the system has all necessary build tools.
-- `--release`: Overrides the target release (e.g., noble, trixie, sid).
-- `--output`: Defines the absolute path for the synthesized ISO file.
-- `--workdir`: Specifies the working directory for the build process.
+```
+--config       Path to the JSON configuration file
+--wizard       Launch the interactive configuration wizard
+--install-deps Install all required build dependencies
+--check-deps   Verify system build dependencies
+--release      Override target release codename
+--output       Define the output ISO file path
+--workdir      Specify the build workspace directory
+--mirror       Override the APT repository mirror URL
+--block-snapd  Apply permanent snapd suppression (default: true)
+--interactive  Enable interactive package selection during build
+--version      Display version and runtime information
+```
 
-## Comparative Analysis of Vanilla Desktop Environments
+## Configuration Schema
 
-Vanilla configurations prioritize core architectural components, minimizing software redundancy.
+The JSON configuration file supports both Ubuntu and Debian targets. The `distro` field is required; if absent, it is inferred from the `release` codename and `mirror` URL.
 
-| Desktop Environment | Display Manager | Memory Usage (Idle) | Storage Allocation |
-|---------------------|-----------------|---------------------|-------------------|
-| GNOME | GDM3 | ~800MB | ~3.0GB |
-| KDE Plasma | SDDM | ~600MB | ~2.5GB |
-| XFCE | LightDM | ~400MB | ~1.5GB |
-| LXQt | SDDM | ~300MB | ~1.0GB |
-| MATE | LightDM | ~400MB | ~1.5GB |
+```json
+{
+  "distro": "debian",
+  "release": "bookworm",
+  "system": {
+    "hostname": "my-debian",
+    "block_snapd": false,
+    "architecture": "amd64",
+    "locale": "en_US.UTF-8",
+    "timezone": "UTC"
+  },
+  "repository": {
+    "mirror": "http://deb.debian.org/debian/",
+    "use_proposed": false
+  },
+  "packages": {
+    "essential": ["sudo", "live-boot", "live-boot-initramfs-tools", "live-config", "live-config-systemd", "..."],
+    "additional": ["vim", "curl", "wget"],
+    "desktop": "xfce",
+    "kernel": "linux-image-amd64",
+    "remove_list": [],
+    "enable_flatpak": false
+  },
+  "installer": {
+    "type": "calamares"
+  },
+  "network": {
+    "manager": "network-manager"
+  },
+  "security": {
+    "enable_firewall": false,
+    "block_snapd_forever": false,
+    "disable_services": []
+  }
+}
+```
 
-Detailed configuration profiles are available for GNOME Shell, KDE Plasma, XFCE, LXQt, MATE, Budgie, Cinnamon, Unity, and UKUI within the `examples/` directory.
+## Debian Essential Package Manifest
+
+The following packages constitute the mandatory live system foundation for Debian builds:
+
+```
+sudo  live-boot  live-boot-initramfs-tools  live-config  live-config-systemd
+discover  laptop-detect  os-prober  network-manager  net-tools
+wireless-tools  wpasupplicant  locales  grub-common  grub-pc
+grub-pc-bin  grub2-common  grub-efi-amd64  shim-signed  mtools  binutils
+```
+
+Note that `casper`, `grub-gfxpayload-lists`, and `ubuntu-standard` are Ubuntu-specific and must not be used in Debian configurations.
+
+## Desktop Environments
+
+### Ubuntu (vanilla package selection)
+
+| Desktop | Display Manager | Idle Memory | Approximate Storage |
+|---|---|---|---|
+| GNOME | GDM3 | ~800 MB | ~3.0 GB |
+| KDE Plasma | SDDM | ~600 MB | ~2.5 GB |
+| Xfce | LightDM | ~400 MB | ~1.5 GB |
+| LXQt | SDDM | ~300 MB | ~1.0 GB |
+| MATE | LightDM | ~400 MB | ~1.5 GB |
+
+### Debian (task metapackages)
+
+| Desktop | Package |
+|---|---|
+| GNOME | task-gnome-desktop |
+| KDE Plasma | task-kde-desktop |
+| Xfce | task-xfce-desktop |
+| LXQt | task-lxqt-desktop |
+| MATE | task-mate-desktop |
+| LXDE | task-lxde-desktop |
 
 ## Synthesis Lifecycle
 
 Upon invocation, Kagami executes the following sequential phases:
-1. **Environmental Verification**: Assessment of prerequisites and privileges.
-2. **Directory Initialization**: Allocation of workspace resources.
-3. **Bootstrap Phase**: Initialization of the core Ubuntu root filesystem.
-4. **Environment Encapsulation**: Mounting and configuration of the chroot environment.
-5. **Package Proliferation**: Installation of specified software components.
-6. **Constraint Implementation**: Permanent suppression of the snapd daemon.
-7. **Desktop Deployment**: Integration of the selected graphical interface.
-8. **Bootloader Configuration**: Initialization of GRUB protocols.
-9. **Finalization**: Creation of the SquashFS image and ISO synthesis.
+
+1. Prerequisite verification and privilege assessment
+2. Directory structure initialisation
+3. Base system bootstrap via `debootstrap`
+4. Filesystem mounting and chroot preparation
+5. System configuration and APT source registration
+6. Package installation (essential, kernel, additional)
+7. Snapd suppression (Ubuntu only, seven-layer architecture)
+8. Desktop environment deployment
+9. Flatpak support configuration (optional)
+10. Bootloader configuration (GRUB BIOS and EFI)
+11. Chroot cleanup and filesystem preparation
+12. SquashFS image creation
+13. ISO synthesis via xorriso
+14. Mount cleanup and workspace finalisation
 
 ## Validation and Deployment
 
-### Virtualized Validation
+### Virtualised Validation
 
-Synthesized images should be validated using hypervisors:
-
-```bash
-# QEMU Execution
-qemu-system-x86_64 -cdrom kagami-ubuntu-noble.iso -m 2048 -enable-kvm -boot d
+```
+qemu-system-x86_64 -cdrom kagami-debian-bookworm.iso -m 2048 -enable-kvm -boot d
 ```
 
-### Physical Media Synthesis
+### Physical Media Writing
 
-For hardware initialization, the `dd` utility is recommended for bit-for-bit synthesis to physical media:
-
-```bash
+```
 sudo dd if=<iso> of=/dev/sdX bs=4M status=progress oflag=sync
 ```
 
-## Snapd Suppression Methodology
+## Snapd Suppression Methodology (Ubuntu)
 
-The system employs a seven-layer defensive architecture:
-1. APT policy pinning (Priority -1).
-2. Systemd service masking.
-3. Pre-installation hooks for package blocking.
-4. Binary diversion to null interfaces.
-5. Environment variable constraints.
-6. Message of the Day (MOTD) status notification.
-7. Local filesystem marker verification.
-
-## Conclusion
-
-Kagami provides a rigorous, reproducible methodology for the creation of minimal Ubuntu distributions. By eliminating non-essential components and ensuring a direct mapping from configuration to implementation, it serves as an essential tool for system administrators and power users seeking ultimate control over their operating environment.
+The seven-layer defensive architecture comprises: APT policy pinning (Priority -1), systemd service masking, pre-installation hook enforcement, binary diversion to null interfaces, environment variable constraints, MOTD status notification, and local filesystem marker verification. This architecture is inapplicable to Debian builds, where snapd is not a system component.
 
 ---
 
-Kagami Version 4.0 - Reflecting Pure Ubuntu Principles
+Kagami Version 4.1 - Reflecting Vanilla Debian and Ubuntu Principles

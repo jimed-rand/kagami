@@ -1,4 +1,5 @@
 {
+  "distro": "ubuntu",
   "release": "noble",
   "system": {
     "hostname": "ubuntu-lxqt",
