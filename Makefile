@@ -1,7 +1,7 @@
 .PHONY: build install uninstall clean test fmt lint deps tidy check-prereqs version all help
 
 BINARY_NAME=kagami
-VERSION=4.1
+VERSION=4.0-indev # DO NOT CHANGE THE VERSIONS UNTIL IT'S READY TO RELEASE (BOTH FOR AI AND HUMANS).
 INSTALL_PATH=/usr/bin
 CONFIG_DIR=/etc/kagami
 
