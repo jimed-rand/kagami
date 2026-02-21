@@ -15,11 +15,13 @@ import (
 var (
 	titleStyle = lipgloss.NewStyle().
 			Bold(true).
+			Foreground(lipgloss.Color("0")).
+			Background(lipgloss.Color("15")).
 			Padding(0, 1)
 
-	itemStyle         = lipgloss.NewStyle().PaddingLeft(4)
-	selectedItemStyle = lipgloss.NewStyle().PaddingLeft(2).Bold(true)
-	successStyle      = lipgloss.NewStyle().Bold(true)
+	itemStyle         = lipgloss.NewStyle().PaddingLeft(4).Foreground(lipgloss.Color("15"))
+	selectedItemStyle = lipgloss.NewStyle().PaddingLeft(2).Bold(true).Foreground(lipgloss.Color("15"))
+	successStyle      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15"))
 )
 
 type item struct {
@@ -75,12 +77,27 @@ type Model struct {
 func NewModel() Model {
 	ti := textinput.New()
 	ti.Focus()
+	ti.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
+	ti.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
 
 	return Model{
 		state:   stateDistro,
 		choices: make(map[string]string),
 		input:   ti,
 	}
+}
+
+func newBWDelegate() list.DefaultDelegate {
+	d := list.NewDefaultDelegate()
+	bw := lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
+	d.Styles.NormalTitle = bw
+	d.Styles.NormalDesc = bw
+	sel := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("0")).Background(lipgloss.Color("15")).Padding(0, 1)
+	d.Styles.SelectedTitle = sel
+	d.Styles.SelectedDesc = sel.Copy().Bold(false)
+	d.Styles.DimmedTitle = bw
+	d.Styles.DimmedDesc = bw
+	return d
 }
 
 func (m Model) Init() tea.Cmd {
@@ -233,7 +250,7 @@ func (m Model) updateDistro(msg tea.Msg) (Model, tea.Cmd) {
 			item{"ubuntu", "Ubuntu", "Ubuntu-based ISO synthesis"},
 			item{"debian", "Debian", "Debian-based ISO synthesis"},
 		}
-		m.list = list.New(items, list.NewDefaultDelegate(), 0, 0)
+		m.list = list.New(items, newBWDelegate(), 0, 0)
 		m.list.Title = "Distribution"
 		m.list.SetShowStatusBar(false)
 		m.list.SetFilteringEnabled(false)
@@ -271,7 +288,7 @@ func (m Model) updateRelease(msg tea.Msg) (Model, tea.Cmd) {
 				item{"devel", "Development", "Ubuntu Rolling Development"},
 			}
 		}
-		m.list = list.New(items, list.NewDefaultDelegate(), 0, 0)
+		m.list = list.New(items, newBWDelegate(), 0, 0)
 		m.list.Title = "Release"
 		m.list.SetShowStatusBar(false)
 		m.list.SetFilteringEnabled(false)
@@ -296,7 +313,7 @@ func (m Model) updateMode(msg tea.Msg) (Model, tea.Cmd) {
 			item{"desktop", "Desktop ISO", "Full desktop environment"},
 			item{"minimal", "Minimal Installer", "Minimal live environment"},
 		}
-		m.list = list.New(items, list.NewDefaultDelegate(), 0, 0)
+		m.list = list.New(items, newBWDelegate(), 0, 0)
 		m.list.Title = "Build Mode"
 	}
 
@@ -324,7 +341,7 @@ func (m Model) updateWM(msg tea.Msg) (Model, tea.Cmd) {
 			item{"dwm", "dwm", "Dynamic window manager"},
 			item{"xfce4-minimal", "Xfce4 (Minimal)", "Xfce4 panel and desktop"},
 		}
-		m.list = list.New(items, list.NewDefaultDelegate(), 0, 0)
+		m.list = list.New(items, newBWDelegate(), 0, 0)
 		m.list.Title = "Window Manager"
 	}
 
@@ -366,7 +383,7 @@ func (m Model) updateDesktop(msg tea.Msg) (Model, tea.Cmd) {
 				item{"none", "None (Manual)", "Specify packages later"},
 			}
 		}
-		m.list = list.New(items, list.NewDefaultDelegate(), 0, 0)
+		m.list = list.New(items, newBWDelegate(), 0, 0)
 		m.list.Title = "Desktop Environment"
 	}
 
@@ -395,7 +412,7 @@ func (m Model) updateInstaller(msg tea.Msg) (Model, tea.Cmd) {
 			item{"ubiquity", "Ubiquity", "Traditional Ubuntu installer"},
 			item{"calamares", "Calamares", "Universal installer framework"},
 		}
-		m.list = list.New(items, list.NewDefaultDelegate(), 0, 0)
+		m.list = list.New(items, newBWDelegate(), 0, 0)
 		m.list.Title = "Installer"
 	}
 
@@ -425,7 +442,7 @@ func (m Model) updateSlideshow(msg tea.Msg) (Model, tea.Cmd) {
 			item{"lubuntu", "Lubuntu", "LXQt slideshow"},
 			item{"ubuntu-mate", "Ubuntu MATE", "MATE slideshow"},
 		}
-		m.list = list.New(items, list.NewDefaultDelegate(), 0, 0)
+		m.list = list.New(items, newBWDelegate(), 0, 0)
 		m.list.Title = "Slideshow"
 	}
 
@@ -473,7 +490,7 @@ func (m Model) updateArch(msg tea.Msg) (Model, tea.Cmd) {
 			item{"amd64", "amd64", "64-bit x86"},
 			item{"arm64", "arm64", "64-bit ARM"},
 		}
-		m.list = list.New(items, list.NewDefaultDelegate(), 0, 0)
+		m.list = list.New(items, newBWDelegate(), 0, 0)
 		m.list.Title = "Architecture"
 	}
 
@@ -506,7 +523,7 @@ func (m Model) updateKernel(msg tea.Msg) (Model, tea.Cmd) {
 				item{"linux-oem-24.04", "OEM", "OEM stabilised kernel"},
 			}
 		}
-		m.list = list.New(items, list.NewDefaultDelegate(), 0, 0)
+		m.list = list.New(items, newBWDelegate(), 0, 0)
 		m.list.Title = "Kernel"
 	}
 
@@ -672,7 +689,7 @@ func (m Model) updateFlatpak(msg tea.Msg) (Model, tea.Cmd) {
 			item{"y", "Yes", "Enable Flatpak support"},
 			item{"n", "No", "Disable Flatpak support"},
 		}
-		m.list = list.New(items, list.NewDefaultDelegate(), 0, 0)
+		m.list = list.New(items, newBWDelegate(), 0, 0)
 		m.list.Title = "Flatpak Support"
 	}
 
@@ -699,7 +716,7 @@ func (m Model) updateSnapd(msg tea.Msg) (Model, tea.Cmd) {
 			item{"y", "Yes", "Apply permanent snapd suppression"},
 			item{"n", "No", "Allow snapd"},
 		}
-		m.list = list.New(items, list.NewDefaultDelegate(), 0, 0)
+		m.list = list.New(items, newBWDelegate(), 0, 0)
 		m.list.Title = "Snapd Suppression"
 	}
 
@@ -722,7 +739,7 @@ func (m Model) updateFirewall(msg tea.Msg) (Model, tea.Cmd) {
 			item{"y", "Yes", "Enable UFW firewall"},
 			item{"n", "No", "Disable UFW firewall"},
 		}
-		m.list = list.New(items, list.NewDefaultDelegate(), 0, 0)
+		m.list = list.New(items, newBWDelegate(), 0, 0)
 		m.list.Title = "Firewall"
 	}
 
@@ -762,7 +779,7 @@ func (m Model) updateConfirm(msg tea.Msg) (Model, tea.Cmd) {
 			item{"y", "Yes", "Start building ISO"},
 			item{"n", "No", "Exit without building"},
 		}
-		m.list = list.New(items, list.NewDefaultDelegate(), 0, 0)
+		m.list = list.New(items, newBWDelegate(), 0, 0)
 		m.list.Title = "Confirm"
 	}
 
