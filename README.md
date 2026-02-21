@@ -222,7 +222,3 @@ sudo dd if=<iso> of=/dev/sdX bs=4M status=progress oflag=sync
 ## Snapd Suppression Methodology (Ubuntu)
 
 The seven-layer defensive architecture comprises: APT policy pinning (Priority -1), systemd service masking, pre-installation hook enforcement, binary diversion to null interfaces, environment variable constraints, MOTD status notification, and local filesystem marker verification. This architecture is inapplicable to Debian builds, where snapd is not a system component.
-
----
-
-Kagami Version 4.1 - Reflecting Vanilla Debian and Ubuntu Principles
