@@ -196,11 +196,10 @@ func (c *Config) Validate() error {
 
 	validInstallers := map[string]bool{
 		"ubiquity":  true,
-		"subiquity": true,
 		"calamares": true,
 	}
 	if !validInstallers[c.Installer.Type] {
-		return errors.New("unsupported installer type; accepted values: ubiquity, subiquity, calamares")
+		return errors.New("unsupported installer type; accepted values: ubiquity, calamares")
 	}
 
 	return nil
