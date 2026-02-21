@@ -6,10 +6,11 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 
 	"kagami/pkg/builder"
@@ -153,6 +154,8 @@ func main() {
 		wizardIsoPath := filepath.Join(wizardWorkDir, fmt.Sprintf("kagami-%s.iso", cfg.Release))
 
 		b := builder.NewBuilder(cfg, wizardWorkDir, wizardIsoPath)
+		stopSignals := setupSignalHandler(b)
+		defer close(stopSignals)
 
 		if logMode == "tui" {
 			if err := tui.ShowBuild(b); err != nil {
@@ -258,6 +261,9 @@ func main() {
 	}
 
 	b := builder.NewBuilder(cfg, baseWorkDir, isoPath)
+	stopSignals := setupSignalHandler(b)
+	defer close(stopSignals)
+
 	printBuildInfo(cfg, baseWorkDir, isoPath)
 
 	if *interactive {
@@ -391,34 +397,86 @@ func relocateISO(isoPath, workDir string) string {
 	absISO, _ := filepath.Abs(isoPath)
 	absWork, _ := filepath.Abs(workDir)
 
-	if !strings.HasPrefix(absISO, absWork) {
+	rel, err := filepath.Rel(absWork, absISO)
+	if err != nil || strings.HasPrefix(rel, "..") {
 		return isoPath
 	}
 
+	var destDir string
 	execPath, err := os.Executable()
-	if err != nil {
-		return isoPath
+	if err == nil {
+		destDir = filepath.Dir(execPath)
 	}
-	destDir := filepath.Dir(execPath)
 
-	if strings.Contains(destDir, "/usr/bin") || strings.Contains(destDir, "/bin") {
-		destDir, _ = os.Getwd()
+	cwd, _ := os.Getwd()
+	if destDir == "" ||
+		strings.HasPrefix(destDir, "/tmp") ||
+		strings.HasPrefix(destDir, "/usr") ||
+		strings.HasPrefix(destDir, "/bin") ||
+		destDir == absWork ||
+		strings.HasPrefix(destDir, absWork+string(os.PathSeparator)) {
+		destDir = cwd
 	}
 
 	newPath := filepath.Join(destDir, filepath.Base(isoPath))
-	if absISO == newPath {
+	absNew, _ := filepath.Abs(newPath)
+
+	if absISO == absNew {
 		return isoPath
 	}
 
-	fmt.Printf("\n[INFO] Relocating ISO to: %s\n", newPath)
-	if err := os.Rename(isoPath, newPath); err != nil {
-		cmd := exec.Command("cp", isoPath, newPath)
-		if err := cmd.Run(); err != nil {
-			fmt.Printf("[WARNING] ISO relocation failed: %v\n", err)
-			return isoPath
-		}
-		os.Remove(isoPath)
+	fmt.Printf("\n[INFO] Relocating ISO from workspace to: %s\n", absNew)
+
+	if err := os.Rename(absISO, absNew); err == nil {
+		return absNew
 	}
 
-	return newPath
+	input, err := os.Open(absISO)
+	if err != nil {
+		fmt.Printf("[ERROR] Cannot open source ISO for relocation: %v\n", err)
+		return absISO
+	}
+	defer input.Close()
+
+	output, err := os.OpenFile(absNew, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		fmt.Printf("[ERROR] Cannot create destination ISO for relocation: %v\n", err)
+		return absISO
+	}
+	defer output.Close()
+
+	if _, err := output.ReadFrom(input); err != nil {
+		fmt.Printf("[ERROR] ISO copy failed: %v\n", err)
+		return absISO
+	}
+
+	input.Close()
+	output.Close()
+	os.Remove(absISO)
+
+	return absNew
+}
+
+func setupSignalHandler(b *builder.Builder) chan struct{} {
+	stop := make(chan struct{})
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		select {
+		case sig := <-sigChan:
+			fmt.Printf("\n\n[INFO] Signal received (%v). Initiating emergency cleanup...\n", sig)
+			// Disable callbacks to prevent logging back to a potentially closed TUI
+			b.OnLog = nil
+			b.OnProgress = nil
+			b.RemoveWorkspace()
+			fmt.Println("[OK] Cleanup complete. Exiting.")
+			os.Exit(128 + int(sig.(syscall.Signal)))
+		case <-stop:
+			signal.Stop(sigChan)
+			return
+		}
+	}()
+
+	return stop
 }

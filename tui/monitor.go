@@ -66,8 +66,18 @@ func ShowBuild(b *builder.Builder) error {
 		p.Send(doneMsg{err})
 	}()
 
-	_, err := p.Run()
-	return err
+	res, err := p.Run()
+	if err != nil {
+		return err
+	}
+	final := res.(monitorModel)
+	if final.err != nil {
+		return final.err
+	}
+	if !final.done {
+		return fmt.Errorf("build procedure aborted by user")
+	}
+	return nil
 }
 
 func (m monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -92,6 +102,7 @@ func (m monitorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case tea.KeyMsg:
 		if msg.String() == "ctrl+c" {
+			m.err = fmt.Errorf("build procedure aborted by user")
 			return m, tea.Quit
 		}
 	}
