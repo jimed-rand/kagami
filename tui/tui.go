@@ -1,850 +1,347 @@
 package tui
 
 import (
-	"os"
+	"kagami/pkg/config"
 	"strings"
 
-	"kagami/pkg/config"
-
-	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/tview"
 )
-
-var (
-	windowStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			Padding(1, 4).
-			Align(lipgloss.Left)
-
-	titleStyle = lipgloss.NewStyle().
-			Bold(true).
-			Underline(true)
-
-	statusStyle = lipgloss.NewStyle().
-			Bold(true).
-			Border(lipgloss.NormalBorder(), false, false, true, false)
-
-	buttonStyle = lipgloss.NewStyle().
-			Bold(true).
-			Padding(0, 1).
-			Border(lipgloss.NormalBorder())
-)
-
-type item struct {
-	key, label, desc string
-}
-
-func (i item) Title() string       { return i.label }
-func (i item) Description() string { return i.desc }
-func (i item) FilterValue() string { return i.label }
-
-type state int
-
-const (
-	stateDistro state = iota
-	stateRelease
-	stateMode
-	stateWM
-	stateDesktop
-	stateInstaller
-	stateSlideshow
-	stateHostname
-	stateArch
-	stateKernel
-	stateExtraPkgs
-	stateMirror
-	stateBrandingName
-	stateBrandingShort
-	stateBrandingUrl
-	stateBrandingSupport
-	stateBrandingVersion
-	stateFlatpak
-	stateSnapd
-	stateFirewall
-	stateOutputPath
-	stateConfirm
-	stateFinished
-)
-
-type Model struct {
-	state          state
-	list           list.Model
-	input          textinput.Model
-	choices        map[string]string
-	cfg            *config.Config
-	outputPath     string
-	width          int
-	height         int
-	additionalPkgs []string
-	quitting       bool
-}
-
-func NewModel() Model {
-	ti := textinput.New()
-	ti.Focus()
-
-	l := list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
-	l.SetShowStatusBar(false)
-	l.SetFilteringEnabled(false)
-	l.SetShowTitle(false)
-	l.SetShowHelp(false)
-
-	return Model{
-		state:   stateDistro,
-		choices: make(map[string]string),
-		input:   ti,
-		list:    l,
-	}
-}
-
-func (m Model) Init() tea.Cmd {
-	return nil
-}
-
-func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "ctrl+c":
-			m.quitting = true
-			return m, tea.Quit
-		}
-
-	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-		windowStyle.Width(msg.Width - 10)
-	}
-
-	var cmd tea.Cmd
-	switch m.state {
-	case stateDistro:
-		m, cmd = m.updateDistro(msg)
-	case stateRelease:
-		m, cmd = m.updateRelease(msg)
-	case stateMode:
-		m, cmd = m.updateMode(msg)
-	case stateWM:
-		m, cmd = m.updateWM(msg)
-	case stateDesktop:
-		m, cmd = m.updateDesktop(msg)
-	case stateInstaller:
-		m, cmd = m.updateInstaller(msg)
-	case stateSlideshow:
-		m, cmd = m.updateSlideshow(msg)
-	case stateHostname:
-		m, cmd = m.updateHostname(msg)
-	case stateArch:
-		m, cmd = m.updateArch(msg)
-	case stateKernel:
-		m, cmd = m.updateKernel(msg)
-	case stateExtraPkgs:
-		m, cmd = m.updateExtraPkgs(msg)
-	case stateMirror:
-		m, cmd = m.updateMirror(msg)
-	case stateBrandingName:
-		m, cmd = m.updateBrandingName(msg)
-	case stateBrandingShort:
-		m, cmd = m.updateBrandingShort(msg)
-	case stateBrandingUrl:
-		m, cmd = m.updateBrandingUrl(msg)
-	case stateBrandingSupport:
-		m, cmd = m.updateBrandingSupport(msg)
-	case stateBrandingVersion:
-		m, cmd = m.updateBrandingVersion(msg)
-	case stateFlatpak:
-		m, cmd = m.updateFlatpak(msg)
-	case stateSnapd:
-		m, cmd = m.updateSnapd(msg)
-	case stateFirewall:
-		m, cmd = m.updateFirewall(msg)
-	case stateOutputPath:
-		m, cmd = m.updateOutputPath(msg)
-	case stateConfirm:
-		m, cmd = m.updateConfirm(msg)
-	}
-
-	return m, cmd
-}
-
-func (m Model) View() string {
-	if m.quitting {
-		return ""
-	}
-
-	header := titleStyle.Render(" Kagami ISO Builder - Configuration Wizard ") + "\n"
-
-	content := ""
-	prompt := ""
-
-	switch m.state {
-	case stateDistro:
-		prompt = "Select Base Distribution"
-		content = m.list.View()
-	case stateRelease:
-		prompt = "Select Release"
-		content = m.list.View()
-	case stateMode:
-		prompt = "Select Build Mode"
-		content = m.list.View()
-	case stateWM:
-		prompt = "Select Window Manager"
-		content = m.list.View()
-	case stateDesktop:
-		prompt = "Select Desktop Environment"
-		content = m.list.View()
-	case stateInstaller:
-		prompt = "Select Installer"
-		content = m.list.View()
-	case stateSlideshow:
-		prompt = "Select Installer Slideshow"
-		content = m.list.View()
-	case stateHostname:
-		prompt = "Enter System Hostname"
-		content = m.input.View()
-	case stateArch:
-		prompt = "Select Target Architecture"
-		content = m.list.View()
-	case stateKernel:
-		prompt = "Select Kernel Variant"
-		content = m.list.View()
-	case stateExtraPkgs:
-		prompt = "Additional Packages (comma-separated)"
-		content = m.input.View()
-	case stateMirror:
-		prompt = "APT Repository Mirror"
-		content = m.input.View()
-	case stateBrandingName:
-		prompt = "Product Name"
-		content = m.input.View()
-	case stateBrandingShort:
-		prompt = "Short Product Name"
-		content = m.input.View()
-	case stateBrandingUrl:
-		prompt = "Product URL"
-		content = m.input.View()
-	case stateBrandingSupport:
-		prompt = "Support URL"
-		content = m.input.View()
-	case stateBrandingVersion:
-		prompt = "Version"
-		content = m.input.View()
-	case stateFlatpak:
-		prompt = "Enable Flatpak Support?"
-		content = m.list.View()
-	case stateSnapd:
-		prompt = "Apply Permanent Snapd Suppression?"
-		content = m.list.View()
-	case stateFirewall:
-		prompt = "Enable UFW Firewall?"
-		content = m.list.View()
-	case stateOutputPath:
-		prompt = "Output File Path"
-		content = m.input.View()
-	case stateConfirm:
-		prompt = "Finalize Configuration"
-		content = m.list.View()
-	}
-
-	view := statusStyle.Render(prompt) + "\n\n" + content + "\n\n"
-	view += "[ Up/Down: Navigate ]  [ Enter: Select ]  [ Ctrl+C: Quit ]"
-
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
-		windowStyle.Render(header+"\n"+view))
-}
-
-func (m Model) updateDistro(msg tea.Msg) (Model, tea.Cmd) {
-	if len(m.list.Items()) == 0 {
-		items := []list.Item{
-			item{"ubuntu", "Ubuntu", "Build for Ubuntu systems"},
-			item{"debian", "Debian", "Build for Debian systems"},
-		}
-		m.list.SetItems(items)
-		m.list.SetSize(m.width-20, 10)
-	}
-
-	var cmd tea.Cmd
-	m.list, cmd = m.list.Update(msg)
-
-	if km, ok := msg.(tea.KeyMsg); ok && km.String() == "enter" {
-		i := m.list.SelectedItem().(item)
-		m.choices["distro"] = i.key
-		m.state = stateRelease
-		m.list.SetItems(nil)
-	}
-
-	return m, cmd
-}
-
-func (m Model) updateRelease(msg tea.Msg) (Model, tea.Cmd) {
-	if len(m.list.Items()) == 0 {
-		var items []list.Item
-		if m.choices["distro"] == "debian" {
-			items = []list.Item{
-				item{"stable", "Stable", "Current Debian Stable"},
-				item{"testing", "Testing", "Rolling Testing"},
-				item{"unstable", "Unstable", "Debian Unstable (Sid)"},
-				item{"bookworm", "Bookworm", "Debian 12"},
-				item{"trixie", "Trixie", "Debian 13"},
-			}
-		} else {
-			items = []list.Item{
-				item{"noble", "Noble Numbat", "Ubuntu 24.04 LTS"},
-				item{"resolute", "Resolute Rambutan", "Ubuntu 26.04 LTS"},
-				item{"jammy", "Jammy Jellyfish", "Ubuntu 22.04 LTS"},
-				item{"devel", "Development", "Development Rolling"},
-			}
-		}
-		m.list.SetItems(items)
-	}
-
-	var cmd tea.Cmd
-	m.list, cmd = m.list.Update(msg)
-
-	if km, ok := msg.(tea.KeyMsg); ok && km.String() == "enter" {
-		i := m.list.SelectedItem().(item)
-		m.choices["release"] = i.key
-		m.state = stateMode
-		m.list.SetItems(nil)
-	}
-
-	return m, cmd
-}
-
-func (m Model) updateMode(msg tea.Msg) (Model, tea.Cmd) {
-	if len(m.list.Items()) == 0 {
-		items := []list.Item{
-			item{"desktop", "Desktop Mode", "Full graphical environment"},
-			item{"minimal", "Minimal Mode", "Minimal installer image"},
-		}
-		m.list.SetItems(items)
-	}
-
-	var cmd tea.Cmd
-	m.list, cmd = m.list.Update(msg)
-
-	if km, ok := msg.(tea.KeyMsg); ok && km.String() == "enter" {
-		i := m.list.SelectedItem().(item)
-		m.choices["mode"] = i.key
-		if i.key == "minimal" {
-			m.state = stateWM
-		} else {
-			m.state = stateDesktop
-		}
-		m.list.SetItems(nil)
-	}
-
-	return m, cmd
-}
-
-func (m Model) updateWM(msg tea.Msg) (Model, tea.Cmd) {
-	if len(m.list.Items()) == 0 {
-		items := []list.Item{
-			item{"openbox", "Openbox", "Stacking window manager"},
-			item{"dwm", "dwm", "Dynamic window manager"},
-			item{"xfce4-minimal", "Xfce4-Lite", "Minimalist Xfce setup"},
-		}
-		m.list.SetItems(items)
-	}
-
-	var cmd tea.Cmd
-	m.list, cmd = m.list.Update(msg)
-
-	if km, ok := msg.(tea.KeyMsg); ok && km.String() == "enter" {
-		i := m.list.SelectedItem().(item)
-		m.choices["wm"] = i.key
-		m.choices["desktop"] = "none"
-		m.state = stateInstaller
-		m.list.SetItems(nil)
-	}
-
-	return m, cmd
-}
-
-func (m Model) updateDesktop(msg tea.Msg) (Model, tea.Cmd) {
-	if len(m.list.Items()) == 0 {
-		var items []list.Item
-		if m.choices["distro"] == "debian" {
-			items = []list.Item{
-				item{"xfce", "Xfce", "task-xfce-desktop"},
-				item{"gnome", "GNOME", "task-gnome-desktop"},
-				item{"kde", "KDE Plasma", "task-kde-desktop"},
-				item{"lxqt", "LXQt", "task-lxqt-desktop"},
-				item{"mate", "MATE", "task-mate-desktop"},
-				item{"lxde", "LXDE", "task-lxde-desktop"},
-				item{"none", "Manual", "No default desktop"},
-			}
-		} else {
-			items = []list.Item{
-				item{"gnome", "GNOME", "Ubuntu Desktop"},
-				item{"kde", "KDE", "Kubuntu Desktop"},
-				item{"xfce", "Xfce", "Xubuntu Desktop"},
-				item{"mate", "MATE", "Ubuntu MATE"},
-				item{"lxqt", "LXQt", "Lubuntu Desktop"},
-				item{"none", "Manual", "No default desktop"},
-			}
-		}
-		m.list.SetItems(items)
-	}
-
-	var cmd tea.Cmd
-	m.list, cmd = m.list.Update(msg)
-
-	if km, ok := msg.(tea.KeyMsg); ok && km.String() == "enter" {
-		i := m.list.SelectedItem().(item)
-		m.choices["desktop"] = i.key
-		m.state = stateInstaller
-		m.list.SetItems(nil)
-	}
-
-	return m, cmd
-}
-
-func (m Model) updateInstaller(msg tea.Msg) (Model, tea.Cmd) {
-	if m.choices["mode"] == "minimal" || m.choices["distro"] == "debian" {
-		m.choices["installer"] = "calamares"
-		m.state = stateHostname
-		return m, nil
-	}
-
-	if len(m.list.Items()) == 0 {
-		items := []list.Item{
-			item{"ubiquity", "Ubiquity", "Legacy Ubuntu installer"},
-			item{"calamares", "Calamares", "Modern universal installer"},
-		}
-		m.list.SetItems(items)
-	}
-
-	var cmd tea.Cmd
-	m.list, cmd = m.list.Update(msg)
-
-	if km, ok := msg.(tea.KeyMsg); ok && km.String() == "enter" {
-		i := m.list.SelectedItem().(item)
-		m.choices["installer"] = i.key
-		if i.key == "ubiquity" {
-			m.state = stateSlideshow
-		} else {
-			m.state = stateHostname
-		}
-		m.list.SetItems(nil)
-	}
-
-	return m, cmd
-}
-
-func (m Model) updateSlideshow(msg tea.Msg) (Model, tea.Cmd) {
-	if len(m.list.Items()) == 0 {
-		items := []list.Item{
-			item{"ubuntu", "Ubuntu", "Standard slideshow"},
-			item{"kubuntu", "Kubuntu", "Plasma slideshow"},
-			item{"xubuntu", "Xubuntu", "Xfce slideshow"},
-			item{"lubuntu", "Lubuntu", "LXQt slideshow"},
-			item{"ubuntu-mate", "MATE", "MATE slideshow"},
-		}
-		m.list.SetItems(items)
-	}
-
-	var cmd tea.Cmd
-	m.list, cmd = m.list.Update(msg)
-
-	if km, ok := msg.(tea.KeyMsg); ok && km.String() == "enter" {
-		i := m.list.SelectedItem().(item)
-		m.choices["slideshow"] = i.key
-		m.state = stateHostname
-		m.list.SetItems(nil)
-	}
-
-	return m, cmd
-}
-
-func (m Model) updateHostname(msg tea.Msg) (Model, tea.Cmd) {
-	if m.input.Value() == "" {
-		def := m.choices["distro"]
-		if m.choices["mode"] == "minimal" {
-			def += "-minimal"
-		} else if m.choices["distro"] != "debian" && m.choices["desktop"] != "none" {
-			def += "-" + m.choices["desktop"]
-		} else {
-			def += "-desktop"
-		}
-		m.input.SetValue(def)
-	}
-
-	var cmd tea.Cmd
-	m.input, cmd = m.input.Update(msg)
-
-	if km, ok := msg.(tea.KeyMsg); ok && km.String() == "enter" {
-		m.choices["hostname"] = m.input.Value()
-		m.input.SetValue("")
-		m.state = stateArch
-	}
-
-	return m, cmd
-}
-
-func (m Model) updateArch(msg tea.Msg) (Model, tea.Cmd) {
-	if len(m.list.Items()) == 0 {
-		items := []list.Item{
-			item{"amd64", "x86_64", "64-bit Intel/AMD"},
-			item{"arm64", "aarch64", "64-bit ARM"},
-		}
-		m.list.SetItems(items)
-	}
-
-	var cmd tea.Cmd
-	m.list, cmd = m.list.Update(msg)
-
-	if km, ok := msg.(tea.KeyMsg); ok && km.String() == "enter" {
-		i := m.list.SelectedItem().(item)
-		m.choices["arch"] = i.key
-		m.state = stateKernel
-		m.list.SetItems(nil)
-	}
-
-	return m, cmd
-}
-
-func (m Model) updateKernel(msg tea.Msg) (Model, tea.Cmd) {
-	if len(m.list.Items()) == 0 {
-		var items []list.Item
-		if m.choices["distro"] == "debian" {
-			items = []list.Item{
-				item{"linux-image-amd64", "Generic", "Standard kernel"},
-				item{"linux-image-rt-amd64", "RT", "Real-time kernel"},
-				item{"linux-image-cloud-amd64", "Cloud", "Virtualized kernel"},
-			}
-		} else {
-			items = []list.Item{
-				item{"linux-generic", "Generic", "Standard kernel"},
-				item{"linux-lowlatency", "Low-Latency", "Pro audio kernel"},
-				item{"linux-oem-24.04", "OEM", "Vendor kernel"},
-			}
-		}
-		m.list.SetItems(items)
-	}
-
-	var cmd tea.Cmd
-	m.list, cmd = m.list.Update(msg)
-
-	if km, ok := msg.(tea.KeyMsg); ok && km.String() == "enter" {
-		i := m.list.SelectedItem().(item)
-		m.choices["kernel"] = i.key
-		m.state = stateExtraPkgs
-		m.list.SetItems(nil)
-	}
-
-	return m, cmd
-}
-
-func (m Model) updateExtraPkgs(msg tea.Msg) (Model, tea.Cmd) {
-	var cmd tea.Cmd
-	m.input, cmd = m.input.Update(msg)
-
-	if km, ok := msg.(tea.KeyMsg); ok && km.String() == "enter" {
-		input := m.input.Value()
-		if input != "" {
-			for _, pkg := range strings.Split(input, ",") {
-				pkg = strings.TrimSpace(pkg)
-				if pkg != "" {
-					m.additionalPkgs = append(m.additionalPkgs, pkg)
-				}
-			}
-		}
-		m.input.SetValue("")
-		m.state = stateMirror
-	}
-
-	return m, cmd
-}
-
-func (m Model) updateMirror(msg tea.Msg) (Model, tea.Cmd) {
-	if m.input.Value() == "" {
-		if m.choices["distro"] == "debian" {
-			m.input.SetValue("http://deb.debian.org/debian/")
-		} else {
-			m.input.SetValue("http://archive.ubuntu.com/ubuntu/")
-		}
-	}
-
-	var cmd tea.Cmd
-	m.input, cmd = m.input.Update(msg)
-
-	if km, ok := msg.(tea.KeyMsg); ok && km.String() == "enter" {
-		m.choices["mirror"] = m.input.Value()
-		m.input.SetValue("")
-		if m.choices["installer"] == "calamares" {
-			m.state = stateBrandingName
-		} else {
-			m.state = stateFlatpak
-		}
-	}
-
-	return m, cmd
-}
-
-func (m Model) updateBrandingName(msg tea.Msg) (Model, tea.Cmd) {
-	if m.input.Value() == "" {
-		if m.choices["distro"] == "debian" {
-			m.input.SetValue("Debian GNU/Linux")
-		} else {
-			m.input.SetValue("Ubuntu")
-		}
-	}
-
-	var cmd tea.Cmd
-	m.input, cmd = m.input.Update(msg)
-
-	if km, ok := msg.(tea.KeyMsg); ok && km.String() == "enter" {
-		m.choices["branding_name"] = m.input.Value()
-		m.input.SetValue("")
-		m.state = stateBrandingShort
-	}
-
-	return m, cmd
-}
-
-func (m Model) updateBrandingShort(msg tea.Msg) (Model, tea.Cmd) {
-	if m.input.Value() == "" {
-		if m.choices["distro"] == "debian" {
-			m.input.SetValue("Debian")
-		} else {
-			m.input.SetValue("Ubuntu")
-		}
-	}
-
-	var cmd tea.Cmd
-	m.input, cmd = m.input.Update(msg)
-
-	if km, ok := msg.(tea.KeyMsg); ok && km.String() == "enter" {
-		m.choices["branding_short"] = m.input.Value()
-		m.input.SetValue("")
-		m.state = stateBrandingUrl
-	}
-
-	return m, cmd
-}
-
-func (m Model) updateBrandingUrl(msg tea.Msg) (Model, tea.Cmd) {
-	if m.input.Value() == "" {
-		if m.choices["distro"] == "debian" {
-			m.input.SetValue("https://www.debian.org")
-		} else {
-			m.input.SetValue("https://ubuntu.com")
-		}
-	}
-
-	var cmd tea.Cmd
-	m.input, cmd = m.input.Update(msg)
-
-	if km, ok := msg.(tea.KeyMsg); ok && km.String() == "enter" {
-		m.choices["branding_url"] = m.input.Value()
-		m.input.SetValue("")
-		m.state = stateBrandingSupport
-	}
-
-	return m, cmd
-}
-
-func (m Model) updateBrandingSupport(msg tea.Msg) (Model, tea.Cmd) {
-	if m.input.Value() == "" {
-		m.input.SetValue(m.choices["branding_url"] + "/support")
-	}
-
-	var cmd tea.Cmd
-	m.input, cmd = m.input.Update(msg)
-
-	if km, ok := msg.(tea.KeyMsg); ok && km.String() == "enter" {
-		m.choices["branding_support"] = m.input.Value()
-		m.input.SetValue("")
-		m.state = stateBrandingVersion
-	}
-
-	return m, cmd
-}
-
-func (m Model) updateBrandingVersion(msg tea.Msg) (Model, tea.Cmd) {
-	if m.input.Value() == "" {
-		m.input.SetValue(m.choices["release"])
-	}
-
-	var cmd tea.Cmd
-	m.input, cmd = m.input.Update(msg)
-
-	if km, ok := msg.(tea.KeyMsg); ok && km.String() == "enter" {
-		m.choices["branding_version"] = m.input.Value()
-		m.input.SetValue("")
-		m.state = stateFlatpak
-	}
-
-	return m, cmd
-}
-
-func (m Model) updateFlatpak(msg tea.Msg) (Model, tea.Cmd) {
-	if len(m.list.Items()) == 0 {
-		items := []list.Item{
-			item{"y", "Yes", "Runtime environment"},
-			item{"n", "No", "Skip flatpak"},
-		}
-		m.list.SetItems(items)
-	}
-
-	var cmd tea.Cmd
-	m.list, cmd = m.list.Update(msg)
-
-	if km, ok := msg.(tea.KeyMsg); ok && km.String() == "enter" {
-		i := m.list.SelectedItem().(item)
-		m.choices["flatpak"] = i.key
-		if m.choices["distro"] == "ubuntu" {
-			m.state = stateSnapd
-		} else {
-			m.state = stateFirewall
-		}
-		m.list.SetItems(nil)
-	}
-
-	return m, cmd
-}
-
-func (m Model) updateSnapd(msg tea.Msg) (Model, tea.Cmd) {
-	if len(m.list.Items()) == 0 {
-		items := []list.Item{
-			item{"y", "Yes", "Permanent suppression"},
-			item{"n", "No", "Allow snapd"},
-		}
-		m.list.SetItems(items)
-	}
-
-	var cmd tea.Cmd
-	m.list, cmd = m.list.Update(msg)
-
-	if km, ok := msg.(tea.KeyMsg); ok && km.String() == "enter" {
-		i := m.list.SelectedItem().(item)
-		m.choices["snapd"] = i.key
-		m.state = stateFirewall
-		m.list.SetItems(nil)
-	}
-
-	return m, cmd
-}
-
-func (m Model) updateFirewall(msg tea.Msg) (Model, tea.Cmd) {
-	if len(m.list.Items()) == 0 {
-		items := []list.Item{
-			item{"y", "Yes", "Enable UFW"},
-			item{"n", "No", "No firewall"},
-		}
-		m.list.SetItems(items)
-	}
-
-	var cmd tea.Cmd
-	m.list, cmd = m.list.Update(msg)
-
-	if km, ok := msg.(tea.KeyMsg); ok && km.String() == "enter" {
-		i := m.list.SelectedItem().(item)
-		m.choices["firewall"] = i.key
-		m.state = stateOutputPath
-		m.list.SetItems(nil)
-	}
-
-	return m, cmd
-}
-
-func (m Model) updateOutputPath(msg tea.Msg) (Model, tea.Cmd) {
-	if m.input.Value() == "" {
-		m.input.SetValue("kagami.json")
-	}
-
-	var cmd tea.Cmd
-	m.input, cmd = m.input.Update(msg)
-
-	if km, ok := msg.(tea.KeyMsg); ok && km.String() == "enter" {
-		m.outputPath = m.input.Value()
-		m.input.SetValue("")
-		m.state = stateConfirm
-	}
-
-	return m, cmd
-}
-
-func (m Model) updateConfirm(msg tea.Msg) (Model, tea.Cmd) {
-	if len(m.list.Items()) == 0 {
-		items := []list.Item{
-			item{"y", "Proceed", "Start ISO build"},
-			item{"n", "Exit", "Save and quit"},
-		}
-		m.list.SetItems(items)
-	}
-
-	var cmd tea.Cmd
-	m.list, cmd = m.list.Update(msg)
-
-	if km, ok := msg.(tea.KeyMsg); ok && km.String() == "enter" {
-		i := m.list.SelectedItem().(item)
-		if i.key == "y" {
-			return m, tea.Quit
-		}
-		os.Exit(0)
-	}
-
-	return m, cmd
-}
 
 func Run() (*config.Config, string, error) {
-	p := tea.NewProgram(NewModel(), tea.WithAltScreen())
-	m, err := p.Run()
-	if err != nil {
+	tview.Styles.PrimitiveBackgroundColor = tcell.ColorDefault
+	tview.Styles.ContrastBackgroundColor = tcell.ColorWhite
+	tview.Styles.MoreContrastBackgroundColor = tcell.ColorWhite
+	tview.Styles.PrimaryTextColor = tcell.ColorDefault
+	tview.Styles.SecondaryTextColor = tcell.ColorWhite
+	tview.Styles.TertiaryTextColor = tcell.ColorBlack
+	tview.Styles.InverseTextColor = tcell.ColorBlack
+	tview.Styles.ContrastSecondaryTextColor = tcell.ColorBlack
+	tview.Styles.BorderColor = tcell.ColorDefault
+	tview.Styles.TitleColor = tcell.ColorDefault
+	tview.Styles.GraphicsColor = tcell.ColorDefault
+
+	app := tview.NewApplication()
+	pages := tview.NewPages()
+
+	var (
+		distroChoice    string
+		releaseChoice   string
+		modeChoice      string
+		wmChoice        string
+		desktopChoice   string
+		installerChoice string
+		slideshowChoice string
+		hostnameInput   string
+		archChoice      string
+		kernelChoice    string
+		extraPkgsInput  string
+		mirrorInput     string
+		brandName       string
+		brandShort      string
+		brandUrl        string
+		brandSupport    string
+		brandVersion    string
+		flatpakChoice   bool
+		snapdChoice     bool
+		firewallChoice  bool
+		outputInput     string
+	)
+
+	frameBorder := true
+	formTemplate := func(title string) *tview.Form {
+		f := tview.NewForm()
+		f.SetBorder(frameBorder).SetTitle(" Kagami ISO Builder - " + title + " ").SetTitleAlign(tview.AlignLeft)
+		return f
+	}
+
+	showPage := func(name string) {
+		pages.SwitchToPage(name)
+	}
+
+	var formOutput *tview.Form
+
+	formConfirm := formTemplate("Confirm")
+	formConfirm.AddTextView("Summary", "Are you sure you want to proceed and save this configuration?", 0, 2, true, false).
+		AddButton("Proceed", func() { app.Stop() }).
+		AddButton("Abort", func() { outputInput = ""; app.Stop() })
+
+	formOutput = formTemplate("Output")
+	formOutput.AddInputField("Configuration File Path", "kagami.json", 40, nil, func(text string) { outputInput = text }).
+		AddButton("Next", func() {
+			if outputInput == "" {
+				outputInput = "kagami.json"
+			}
+			showPage("confirm")
+		})
+
+	formFirewall := formTemplate("Firewall")
+	formFirewall.AddCheckbox("Enable UFW Firewall?", false, func(checked bool) { firewallChoice = checked }).
+		AddButton("Next", func() { showPage("output") })
+
+	formSnapd := formTemplate("Snapd")
+	formSnapd.AddCheckbox("Apply permanent snapd suppression?", true, func(checked bool) { snapdChoice = checked }).
+		AddButton("Next", func() { showPage("firewall") })
+
+	formFlatpak := formTemplate("Flatpak")
+	formFlatpak.AddCheckbox("Enable Flatpak Support?", true, func(checked bool) { flatpakChoice = checked }).
+		AddButton("Next", func() {
+			if distroChoice == "ubuntu" {
+				showPage("snapd")
+			} else {
+				snapdChoice = false
+				showPage("firewall")
+			}
+		})
+
+	formBranding := formTemplate("Calamares Branding")
+	formBranding.AddInputField("Product Name", "Debian GNU/Linux", 30, nil, func(text string) { brandName = text }).
+		AddInputField("Short Product Name", "Debian", 20, nil, func(text string) { brandShort = text }).
+		AddInputField("Product URL", "https://www.debian.org", 40, nil, func(text string) { brandUrl = text }).
+		AddInputField("Support URL", "https://www.debian.org/support", 40, nil, func(text string) { brandSupport = text }).
+		AddInputField("Version", "stable", 20, nil, func(text string) { brandVersion = text }).
+		AddButton("Next", func() { showPage("flatpak") })
+
+	formMirror := formTemplate("Mirror")
+	formMirror.AddInputField("APT Repository Mirror", "http://archive.ubuntu.com/ubuntu/", 40, nil, func(text string) { mirrorInput = text }).
+		AddButton("Next", func() {
+			if installerChoice == "calamares" {
+				showPage("branding")
+			} else {
+				showPage("flatpak")
+			}
+		})
+
+	formExtraPkgs := formTemplate("Additional Packages")
+	formExtraPkgs.AddInputField("Comma-separated packages", "", 50, nil, func(text string) { extraPkgsInput = text }).
+		AddButton("Next", func() { showPage("mirror") })
+
+	formKernel := formTemplate("Kernel")
+	formKernel.AddDropDown("Kernel Variant", []string{"Standard", "Real-time", "Cloud", "Low-latency", "OEM"}, 0, func(option string, optionIndex int) {
+		kernelChoice = option
+	}).AddButton("Next", func() {
+		showPage("extrapkgs")
+	})
+
+	formArch := formTemplate("Architecture")
+	formArch.AddDropDown("Target Architecture", []string{"amd64", "arm64"}, 0, func(option string, optionIndex int) {
+		archChoice = option
+	}).AddButton("Next", func() {
+		showPage("kernel")
+	})
+
+	formHostname := formTemplate("Hostname")
+	formHostname.AddInputField("System Hostname", "linux-custom", 30, nil, func(text string) { hostnameInput = text }).
+		AddButton("Next", func() {
+			showPage("arch")
+		})
+
+	formSlideshow := formTemplate("Installer Slideshow")
+	formSlideshow.AddDropDown("Slideshow Variant", []string{"ubuntu", "kubuntu", "xubuntu", "lubuntu", "ubuntu-mate"}, 0, func(option string, optionIndex int) {
+		slideshowChoice = option
+	}).AddButton("Next", func() {
+		showPage("hostname")
+	})
+
+	formInstaller := formTemplate("Installer")
+	formInstaller.AddDropDown("Select Installer", []string{"ubiquity", "calamares"}, 0, func(option string, optionIndex int) {
+		installerChoice = option
+	}).AddButton("Next", func() {
+		if installerChoice == "ubiquity" {
+			showPage("slideshow")
+		} else {
+			showPage("hostname")
+		}
+	})
+
+	formDesktop := formTemplate("Desktop Environment")
+	formDesktop.AddDropDown("Select Desktop", []string{"gnome", "kde", "xfce", "mate", "lxqt", "lxde", "none"}, 0, func(option string, optionIndex int) {
+		desktopChoice = option
+	}).AddButton("Next", func() {
+		showPage("installer")
+	})
+
+	formWM := formTemplate("Window Manager")
+	formWM.AddDropDown("Select Window Manager", []string{"openbox", "dwm", "xfce4-minimal"}, 0, func(option string, optionIndex int) {
+		wmChoice = option
+	}).AddButton("Next", func() {
+		desktopChoice = "none"
+		installerChoice = "calamares"
+		showPage("hostname")
+	})
+
+	formMode := formTemplate("Build Mode")
+	formMode.AddDropDown("Select Build Mode", []string{"desktop", "minimal"}, 0, func(option string, optionIndex int) {
+		modeChoice = option
+	}).AddButton("Next", func() {
+		if modeChoice == "minimal" {
+			showPage("wm")
+		} else {
+			showPage("desktop")
+		}
+	})
+
+	formRelease := formTemplate("Release")
+	formRelease.AddDropDown("Target Release", []string{"noble", "jammy", "resolute", "devel", "stable", "testing", "unstable", "bookworm", "trixie"}, 0, func(option string, optionIndex int) {
+		releaseChoice = option
+	}).AddButton("Next", func() {
+		showPage("mode")
+	})
+
+	formDistro := formTemplate("Distribution")
+	formDistro.AddDropDown("Base Distribution", []string{"ubuntu", "debian"}, 0, func(option string, optionIndex int) {
+		distroChoice = option
+	}).AddButton("Next", func() {
+		showPage("release")
+	})
+
+	pages.AddPage("distro", formDistro, true, true)
+	pages.AddPage("release", formRelease, true, false)
+	pages.AddPage("mode", formMode, true, false)
+	pages.AddPage("wm", formWM, true, false)
+	pages.AddPage("desktop", formDesktop, true, false)
+	pages.AddPage("installer", formInstaller, true, false)
+	pages.AddPage("slideshow", formSlideshow, true, false)
+	pages.AddPage("hostname", formHostname, true, false)
+	pages.AddPage("arch", formArch, true, false)
+	pages.AddPage("kernel", formKernel, true, false)
+	pages.AddPage("extrapkgs", formExtraPkgs, true, false)
+	pages.AddPage("mirror", formMirror, true, false)
+	pages.AddPage("branding", formBranding, true, false)
+	pages.AddPage("flatpak", formFlatpak, true, false)
+	pages.AddPage("snapd", formSnapd, true, false)
+	pages.AddPage("firewall", formFirewall, true, false)
+	pages.AddPage("output", formOutput, true, false)
+	pages.AddPage("confirm", formConfirm, true, false)
+
+	if err := app.SetRoot(pages, true).EnableMouse(true).Run(); err != nil {
 		return nil, "", err
 	}
 
-	finalModel := m.(Model)
-	if finalModel.quitting {
-		os.Exit(0)
+	if outputInput == "" {
+		return nil, "", nil
 	}
 
-	cfg := finalModel.buildConfig()
-	return cfg, finalModel.outputPath, nil
-}
+	if distroChoice == "" {
+		distroChoice = "ubuntu"
+	}
+	if releaseChoice == "" {
+		releaseChoice = "noble"
+	}
+	if desktopChoice == "" {
+		desktopChoice = "none"
+	}
+	if installerChoice == "" {
+		installerChoice = "calamares"
+	}
+	if archChoice == "" {
+		archChoice = "amd64"
+	}
+	if kernelChoice == "" {
+		kernelChoice = "linux-generic"
+	}
+	if mirrorInput == "" {
+		if distroChoice == "debian" {
+			mirrorInput = "http://deb.debian.org/debian/"
+		} else {
+			mirrorInput = "http://archive.ubuntu.com/ubuntu/"
+		}
+	}
+	if hostnameInput == "" {
+		hostnameInput = distroChoice + "-custom"
+	}
 
-func (m Model) buildConfig() *config.Config {
-	branding := config.BrandingConfig{
-		ProductName:      m.choices["branding_name"],
-		ShortProductName: m.choices["branding_short"],
-		ProductUrl:       m.choices["branding_url"],
-		SupportUrl:       m.choices["branding_support"],
-		Version:          m.choices["branding_version"],
+	var addPkgs []string
+	if extraPkgsInput != "" {
+		for _, p := range strings.Split(extraPkgsInput, ",") {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				addPkgs = append(addPkgs, p)
+			}
+		}
+	}
+
+	if modeChoice == "minimal" && wmChoice != "" {
+		addPkgs = append(addPkgs, getMinimalWMPackages(wmChoice)...)
+	}
+
+	kernelResolved := "linux-generic"
+	if distroChoice == "debian" {
+		switch kernelChoice {
+		case "Standard":
+			kernelResolved = "linux-image-amd64"
+		case "Real-time":
+			kernelResolved = "linux-image-rt-amd64"
+		case "Cloud":
+			kernelResolved = "linux-image-cloud-amd64"
+		}
+	} else {
+		switch kernelChoice {
+		case "Standard", "Generic":
+			kernelResolved = "linux-generic"
+		case "Low-latency":
+			kernelResolved = "linux-lowlatency"
+		case "OEM":
+			kernelResolved = "linux-oem-24.04"
+		}
 	}
 
 	cfg := &config.Config{
-		Distro:  m.choices["distro"],
-		Release: m.choices["release"],
+		Distro:  distroChoice,
+		Release: releaseChoice,
 		System: config.SystemConfig{
-			Hostname:     m.choices["hostname"],
-			BlockSnapd:   m.choices["snapd"] == "y",
-			Architecture: m.choices["arch"],
+			Hostname:     hostnameInput,
+			BlockSnapd:   snapdChoice,
+			Architecture: archChoice,
 			Locale:       "en_US.UTF-8",
 			Timezone:     "UTC",
 		},
 		Repository: config.RepositoryConfig{
-			Mirror: m.choices["mirror"],
+			Mirror: mirrorInput,
 		},
 		Packages: config.PackageConfig{
-			Desktop:       m.choices["desktop"],
-			Additional:    m.additionalPkgs,
-			Kernel:        m.choices["kernel"],
-			EnableFlatpak: m.choices["flatpak"] == "y",
-			WM:            m.choices["wm"],
+			Desktop:       desktopChoice,
+			Additional:    addPkgs,
+			Kernel:        kernelResolved,
+			EnableFlatpak: flatpakChoice,
+			WM:            wmChoice,
 		},
 		Installer: config.InstallerConfig{
-			Type:      m.choices["installer"],
-			Slideshow: m.choices["slideshow"],
-			Branding:  branding,
+			Type:      installerChoice,
+			Slideshow: slideshowChoice,
+			Branding: config.BrandingConfig{
+				ProductName:      brandName,
+				ShortProductName: brandShort,
+				ProductUrl:       brandUrl,
+				SupportUrl:       brandSupport,
+				Version:          brandVersion,
+			},
 		},
 		Security: config.SecurityConfig{
-			EnableFirewall: m.choices["firewall"] == "y",
+			EnableFirewall: firewallChoice,
 		},
 	}
 
-	return cfg
+	if err := cfg.SaveToFile(outputInput); err != nil {
+		return nil, "", err
+	}
+
+	return cfg, outputInput, nil
+}
+
+func getMinimalWMPackages(wm string) []string {
+	base := []string{
+		"xorg", "xinit", "xterm", "lightdm", "lightdm-gtk-greeter",
+		"network-manager-gnome", "dbus-x11", "fonts-dejavu-core",
+		"lxappearance", "pcmanfm", "mousepad",
+	}
+	switch wm {
+	case "openbox":
+		base = append(base, "openbox", "obconf", "tint2", "feh", "dunst", "lxpolkit")
+	case "dwm":
+		base = append(base, "dwm", "dmenu", "stterm", "feh", "dunst", "lxpolkit")
+	case "xfce4-minimal":
+		base = append(base, "xfce4-panel", "xfce4-session", "xfce4-settings", "xfce4-terminal", "xfdesktop4", "xfwm4", "thunar")
+	}
+	return base
 }
