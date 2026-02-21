@@ -23,6 +23,8 @@ type Builder struct {
 	ImageDir    string
 	DebianAlias string
 	PrettyName  string
+	OnProgress  func(step, total int, name string)
+	OnLog       func(msg string)
 }
 
 func NewBuilder(cfg *config.Config, workDir, outputISO string) *Builder {
@@ -97,13 +99,37 @@ func (b *Builder) Build() error {
 	}
 
 	for i, step := range steps {
-		fmt.Printf("[%d/%d] %s...\n", i+1, len(steps), step.name)
+		if b.OnProgress != nil {
+			b.OnProgress(i+1, len(steps), step.name)
+		}
+		b.log(fmt.Sprintf("[%d/%d] %s...\n", i+1, len(steps), step.name))
+
 		if err := step.fn(); err != nil {
 			return fmt.Errorf("%s: %v", step.name, err)
 		}
 	}
 
 	return nil
+}
+
+func (b *Builder) log(msg string) {
+	if b.OnLog != nil {
+		b.OnLog(msg)
+	} else {
+		fmt.Print(msg)
+	}
+}
+
+func (b *Builder) runCommand(name string, args ...string) error {
+	cmd := exec.Command(name, args...)
+	if b.OnLog != nil {
+		cmd.Stdout = &logWriter{b}
+		cmd.Stderr = &logWriter{b}
+	} else {
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+	}
+	return cmd.Run()
 }
 
 func (b *Builder) checkPrerequisites() error {
@@ -174,17 +200,15 @@ func (b *Builder) bootstrapSystem() error {
 		fmt.Println("[INFO] Bootstrapping with 'noble' as base for development target")
 	}
 
-	cmd := exec.Command("debootstrap",
+	err := b.runCommand("debootstrap",
 		"--arch="+b.Config.System.Architecture,
 		"--variant=minbase",
 		bootstrapRelease,
 		b.ChrootDir,
 		mirror,
 	)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
 
-	if err := cmd.Run(); err != nil {
+	if err != nil {
 		if system.IsContainer() {
 			return fmt.Errorf("debootstrap failed: %v\n[TIP] Container environments require '--privileged' or CAP_MKNOD for device node creation", err)
 		}

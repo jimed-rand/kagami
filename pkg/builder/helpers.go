@@ -112,11 +112,7 @@ func (b *Builder) createFilesystem() error {
 		args = append(args, "-no-xattrs")
 	}
 
-	cmd := exec.Command("mksquashfs", args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Run(); err != nil {
+	if err := b.runCommand("mksquashfs", args...); err != nil {
 		return err
 	}
 
@@ -351,11 +347,7 @@ func (b *Builder) createISO() error {
 		b.ImageDir,
 	)
 
-	cmd := exec.Command("xorriso", xorrisoArgs...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	return cmd.Run()
+	return b.runCommand("xorriso", xorrisoArgs...)
 }
 
 func (b *Builder) cleanup() error {
@@ -385,7 +377,7 @@ func (b *Builder) cleanup() error {
 }
 
 func (b *Builder) RemoveWorkspace() error {
-	fmt.Printf("[INFO] Removing build workspace: %s\n", b.WorkDir)
+	b.log(fmt.Sprintf("[INFO] Removing build workspace: %s\n", b.WorkDir))
 	b.cleanup()
 	cmd := exec.Command("rm", "-rf", b.WorkDir)
 	return cmd.Run()
@@ -393,8 +385,13 @@ func (b *Builder) RemoveWorkspace() error {
 
 func (b *Builder) chrootExec(command string) error {
 	cmd := exec.Command("chroot", b.ChrootDir, "/bin/bash", "-c", command)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	if b.OnLog != nil {
+		cmd.Stdout = &logWriter{b}
+		cmd.Stderr = &logWriter{b}
+	} else {
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+	}
 	return cmd.Run()
 }
 
@@ -402,6 +399,15 @@ func (b *Builder) chrootExecOutput(command string) (string, error) {
 	cmd := exec.Command("chroot", b.ChrootDir, "/bin/bash", "-c", command)
 	output, err := cmd.Output()
 	return string(output), err
+}
+
+type logWriter struct {
+	b *Builder
+}
+
+func (w *logWriter) Write(p []byte) (n int, err error) {
+	w.b.log(string(p))
+	return len(p), nil
 }
 
 func (b *Builder) generateSourcesList() string {

@@ -20,18 +20,19 @@ import (
 
 func main() {
 	var (
-		configFile  = flag.String("config", "", "Path to the JSON configuration file")
-		release     = flag.String("release", "noble", "Target release codename (e.g. noble, jammy, bookworm, trixie, sid)")
-		workDir     = flag.String("workdir", "", "Working directory for the build process")
-		outputISO   = flag.String("output", "", "Absolute path for the synthesized ISO file")
-		hostname    = flag.String("hostname", "ubuntu-custom", "System hostname for the target image")
-		noSnapd     = flag.Bool("block-snapd", true, "Apply permanent snapd suppression (default: true)")
-		interactive = flag.Bool("interactive", false, "Enable interactive package selection during build")
-		showVersion = flag.Bool("version", false, "Display version and runtime information")
-		checkDeps   = flag.Bool("check-deps", false, "Verify system build dependencies")
-		installDeps = flag.Bool("install-deps", false, "Install missing build dependencies (requires elevated privileges)")
-		mirrorURL   = flag.String("mirror", "", "Override APT repository mirror URL")
-		wizardMode  = flag.Bool("wizard", false, "Launch the interactive configuration wizard")
+		configFile    = flag.String("config", "", "Path to the JSON configuration file")
+		release       = flag.String("release", "noble", "Target release codename (e.g. noble, jammy, bookworm, trixie, sid)")
+		workDir       = flag.String("workdir", "", "Working directory for the build process")
+		outputISO     = flag.String("output", "", "Absolute path for the synthesized ISO file")
+		hostname      = flag.String("hostname", "ubuntu-custom", "System hostname for the target image")
+		noSnapd       = flag.Bool("block-snapd", true, "Apply permanent snapd suppression (default: true)")
+		interactive   = flag.Bool("interactive", false, "Enable interactive package selection during build")
+		showVersion   = flag.Bool("version", false, "Display version and runtime information")
+		checkDeps     = flag.Bool("check-deps", false, "Verify system build dependencies")
+		installDeps   = flag.Bool("install-deps", false, "Install missing build dependencies (requires elevated privileges)")
+		mirrorURL     = flag.String("mirror", "", "Override APT repository mirror URL")
+		wizardMode    = flag.Bool("wizard", false, "Launch the interactive configuration wizard (TUI)")
+		wizardCLIMode = flag.Bool("wizard-cli", false, "Launch the classic CLI configuration wizard")
 	)
 
 	flag.Parse()
@@ -78,6 +79,7 @@ func main() {
 		flag.PrintDefaults()
 		fmt.Printf("\nExamples:\n")
 		fmt.Printf("  sudo %s --wizard\n", os.Args[0])
+		fmt.Printf("  sudo %s --wizard-cli\n", os.Args[0])
 		fmt.Printf("  sudo %s --config examples/debian-bookworm-desktop.json\n\n", os.Args[0])
 		os.Exit(0)
 	}
@@ -124,10 +126,20 @@ func main() {
 		os.Exit(0)
 	}
 
-	if *wizardMode {
-		cfg, outputPath, err := tui.Run()
+	if *wizardMode || *wizardCLIMode {
+		var cfg *config.Config
+		var outputPath string
+		var logMode string
+		var err error
+
+		if *wizardCLIMode {
+			cfg, outputPath, logMode, err = tui.RunCLI()
+		} else {
+			cfg, outputPath, logMode, err = tui.Run()
+		}
+
 		if err != nil {
-			fatal("TUI execution failed: %v", err)
+			fatal("Wizard execution failed: %v", err)
 		}
 		if outputPath == "" {
 			os.Exit(0)
@@ -141,12 +153,20 @@ func main() {
 		wizardIsoPath := filepath.Join(wizardWorkDir, fmt.Sprintf("kagami-%s.iso", cfg.Release))
 
 		b := builder.NewBuilder(cfg, wizardWorkDir, wizardIsoPath)
-		printBuildInfo(cfg, wizardWorkDir, wizardIsoPath)
 
-		if err := b.Build(); err != nil {
-			fmt.Printf("\n[ERROR] %v\n", err)
-			offerCleanup(b, false)
-			os.Exit(1)
+		if logMode == "tui" {
+			if err := tui.ShowBuild(b); err != nil {
+				fmt.Printf("\n[ERROR] %v\n", err)
+				offerCleanup(b, false)
+				os.Exit(1)
+			}
+		} else {
+			printBuildInfo(cfg, wizardWorkDir, wizardIsoPath)
+			if err := b.Build(); err != nil {
+				fmt.Printf("\n[ERROR] %v\n", err)
+				offerCleanup(b, false)
+				os.Exit(1)
+			}
 		}
 
 		wizardIsoPath = relocateISO(wizardIsoPath, wizardWorkDir)
