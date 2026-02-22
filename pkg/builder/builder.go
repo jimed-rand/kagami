@@ -613,7 +613,7 @@ func (b *Builder) installFlatpak() error {
 		return err
 	}
 
-	return b.chrootExec("flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo")
+	return b.chrootExec("flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo 2>/dev/null || true")
 }
 
 func (b *Builder) configureBootloader() error {

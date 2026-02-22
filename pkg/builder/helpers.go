@@ -9,8 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-
-	"kagami/pkg/system"
 )
 
 func (b *Builder) createFilesystem() error {
@@ -108,9 +106,7 @@ func (b *Builder) createFilesystem() error {
 		"-e", "image",
 	}
 
-	if system.IsContainer() {
-		args = append(args, "-no-xattrs")
-	}
+	args = append(args, "-no-xattrs")
 
 	if err := b.runCommand("mksquashfs", args...); err != nil {
 		return err
@@ -292,7 +288,7 @@ func (b *Builder) createISO() error {
 	xorrisoArgs := []string{
 		"-as", "mkisofs",
 		"-iso-level", "3",
-		"-full-iso-9660-filenames",
+		"-full-iso9660-filenames",
 		"-J", "-J", "-joliet-long",
 		"-volid", volid,
 		"-output", b.OutputISO,
