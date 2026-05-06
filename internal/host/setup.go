@@ -11,6 +11,9 @@ import (
 // setupHost installs host-side tooling (debootstrap, squashfs-tools, xorriso)
 // and prepares a clean workspace tree.
 func (p *Pipeline) setupHost(ctx context.Context) error {
+	if err := ensureSupportedHostOS(); err != nil {
+		return err
+	}
 	if err := p.Runner.RunPriv(ctx, "apt-get", "update"); err != nil {
 		return fmt.Errorf("apt-get update: %w", err)
 	}
