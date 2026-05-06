@@ -66,10 +66,32 @@ sudo make install
 sudo make uninstall
 ```
 
+`make build` writes the binary directly at `./kagami` (repository root).
+
 Run without installing:
 
 ```bash
 make run ARGS="--interactive"
+```
+
+## Rolling versioning
+
+Builds use a rolling Git-based version string injected at link time:
+
+- format: `rolling.<commit-count>.<short-sha>[-dirty]`
+- example: `rolling.128.a1b2c3d4e5f6-dirty`
+
+Useful commands:
+
+```bash
+# show resolved version
+make version
+
+# build with auto Git version
+make build
+
+# override manually if needed
+make build VERSION=rolling.custom
 ```
 
 ## Basic usage

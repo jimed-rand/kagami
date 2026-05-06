@@ -28,6 +28,8 @@ import (
 	"kagami/internal/workspace"
 )
 
+var version = "dev"
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "kagami: %v\n", err)
@@ -64,6 +66,7 @@ func run() error {
 
 func runHost(u *ui.UI, cfg config.Config) error {
 	u.Banner("Kagami — Vanilla Ubuntu ISO Builder")
+	u.KV("Version", version)
 	u.KV("Started at", time.Now().Format("2006-01-02 15:04:05 MST"))
 	u.KV("Process", fmt.Sprintf("pid=%d, arch=%s", os.Getpid(), runtime.GOARCH))
 	u.KV("References", cfg.ReferencesDir)
