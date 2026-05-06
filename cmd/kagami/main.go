@@ -90,6 +90,10 @@ func runHost(u *ui.UI, cfg config.Config) error {
 	if err != nil {
 		return fmt.Errorf("locate references: %w", err)
 	}
+	if references.Ephemeral {
+		defer os.RemoveAll(references.Root)
+		u.Warn("references directory not found or incomplete; using embedded Calamares configuration")
+	}
 
 	printBuildSummary(u, cfg, paths)
 
