@@ -2,6 +2,9 @@
 
 `kagami` builds a vanilla Ubuntu live ISO image.
 
+> [!WARNING]
+> This project is currently not maintained until [ubuntu-vanilla-build](https://github.com/jimedrandatorg/ubuntu-vanilla-build) got toasted and ready to re-implementing Kagami project. Do not use this repo until those project is baked and ready to port into Go.
+
 This project ports the legacy shell pipeline in `references/build.sh` to Go,
 while preserving its core flow: host setup, debootstrap, chroot customization,
 then hybrid BIOS/UEFI ISO creation.
